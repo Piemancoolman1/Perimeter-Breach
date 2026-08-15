@@ -198,7 +198,11 @@ export class RemotePlayer {
     updateHealthBarSprite(this.healthBarFg, this.healthBarFgMat, this.health / this.maxHealth, cameraRight);
     if (cameraPos) {
       const distToCamera = this.group.position.distanceTo(cameraPos);
-      updateNameplateVisibility([this.nameTagSprite], distToCamera);
+      // Name tags disabled for now (2026-08-16) — reported as not making sense alongside the
+      // sniper's scoped view. Forcing -Infinity through the same shared visibility helper hides
+      // it unconditionally without touching how the sprite itself is built, so re-enabling later
+      // is just swapping this back to `distToCamera`.
+      updateNameplateVisibility([this.nameTagSprite], -Infinity);
       // Health is only ever visible while this specific player is actively revealed by a
       // Recon Pulse (main.js tracks that per-target, not globally) — the same distance rule
       // still applies underneath so it doesn't show right in someone's face either. Passing

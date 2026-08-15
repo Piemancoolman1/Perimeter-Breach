@@ -22,7 +22,13 @@ html, body {
 #app {
   position: relative;
   width: 100vw;
-  height: 100vh;
+  height: 100vh; /* fallback for browsers without dvh support */
+  /* Mobile browsers compute 100vh as the LARGEST possible viewport (chrome collapsed), while
+     the game's own resize handler sizes the actual canvas off window.innerWidth/innerHeight
+     (the CURRENT viewport, chrome visible or not) — that mismatch stretched the rendered frame
+     to fit a taller CSS box than the canvas was actually drawn at, which is what shifted the
+     crosshair away from where shots actually land. 100dvh tracks the current viewport directly. */
+  height: 100dvh;
 }
 
 #scene {
@@ -30,6 +36,36 @@ html, body {
   inset: 0;
   display: block;
   outline: none;
+}
+
+/* Always-available fullscreen toggle — not gated to touch mode, since desktop users and the
+   landing/lobby screens (before any match starts) can benefit from it too, and it directly
+   sidesteps mobile browser chrome (address bar) eating into the usable viewport. */
+#fullscreen-btn {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 20;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--accent-soft);
+  background: rgba(8, 14, 20, 0.6);
+  color: var(--accent);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+#fullscreen-btn:hover,
+#fullscreen-btn:active {
+  background: rgba(77, 227, 255, 0.22);
+}
+#fullscreen-btn.is-fullscreen {
+  color: #9fd6e8;
+  border-color: rgba(159, 214, 232, 0.4);
 }
 
 /* Crosshair */
@@ -271,6 +307,133 @@ html, body {
   text-align: right;
 }
 
+/* Touch controls — hidden by default; shown only via the body class touchControls.js toggles
+   (auto-detected "(pointer: coarse)" or the manual Settings override), AND only while main.js's
+   showGameplayUI()/hideGameplayUI() has the element's own inline display set to allow it (see
+   the comment on those functions) — same "CSS class gates capability, inline style gates
+   current screen" split #hud's display toggling already established. */
+#touch-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: none;
+}
+body.touch-controls-active #touch-controls {
+  display: block;
+}
+
+#touch-look-zone {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  touch-action: none;
+}
+#touch-move-zone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 50%;
+  height: 100%;
+  z-index: 2;
+  touch-action: none;
+}
+
+#touch-joystick-base {
+  position: absolute;
+  width: 110px;
+  height: 110px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 2px solid var(--accent-soft);
+  background: rgba(255, 255, 255, 0.05);
+  z-index: 3;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+#touch-joystick-base.visible {
+  opacity: 1;
+}
+#touch-joystick-thumb {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 18px var(--accent-soft);
+  opacity: 0.85;
+}
+
+.touch-btn {
+  position: absolute;
+  z-index: 4;
+  border-radius: 50%;
+  background: rgba(77, 227, 255, 0.16);
+  border: 1px solid var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  touch-action: none;
+  padding: 0;
+}
+.touch-btn:active {
+  background: rgba(77, 227, 255, 0.34);
+}
+.touch-btn-fire {
+  width: 84px;
+  height: 84px;
+  right: 22px;
+  bottom: 26px;
+  font-size: 15px;
+  background: rgba(255, 77, 94, 0.18);
+  border-color: rgba(255, 77, 94, 0.45);
+  color: var(--danger);
+}
+.touch-btn-fire:active {
+  background: rgba(255, 77, 94, 0.38);
+}
+.touch-btn-aim {
+  width: 64px;
+  height: 64px;
+  right: 118px;
+  bottom: 40px;
+}
+.touch-btn-jump {
+  width: 64px;
+  height: 64px;
+  right: 96px;
+  bottom: 128px;
+}
+.touch-btn-ability {
+  width: 58px;
+  height: 58px;
+  right: 20px;
+  bottom: 130px;
+}
+.touch-btn-pause {
+  width: 44px;
+  height: 44px;
+  top: 14px;
+  right: 14px;
+  font-size: 16px;
+}
+
+#rotate-device-prompt .rotate-icon {
+  font-size: 64px;
+  color: var(--accent);
+  margin-bottom: 12px;
+  text-shadow: 0 0 20px var(--accent-soft);
+}
+
 #reload-indicator {
   position: absolute;
   top: calc(50% + 32px);
@@ -482,6 +645,25 @@ html, body {
   height: 18px;
   accent-color: var(--accent);
   cursor: pointer;
+}
+
+.sensitivity-row {
+  cursor: default;
+}
+.sensitivity-label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.sensitivity-row input[type="range"] {
+  flex: 1 1 auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.sensitivity-value {
+  flex: 0 0 34px;
+  text-align: right;
+  color: #9fd6e8;
+  font-variant-numeric: tabular-nums;
 }
 
 button {

@@ -21,6 +21,7 @@ import { GrenadeHeldView } from "./game/grenadeView.js";
 import { DebugGraphs } from "./game/debugGraph.js";
 import { SoundBank } from "./game/audio.js";
 import { LobbyClient } from "./net/lobbyClient.js";
+import { TouchControls } from "./game/touchControls.js";
 import "./style.css";
 
 const TOTAL_KILLS_TO_WIN = 20;
@@ -48,11 +49,37 @@ renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
 
-window.addEventListener("resize", () => {
+function handleResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-});
+}
+window.addEventListener("resize", handleResize);
+// Mobile browsers (Safari in particular) resize the *visible* viewport as the address bar/tab
+// bar animates in and out, without reliably firing a plain "resize" event — visualViewport's
+// own resize event is the correct signal for that. Without this, the canvas/camera can end up
+// sized for a taller viewport than what's actually visible, stretching the render and shifting
+// the crosshair away from true screen-center (raycasts fire from NDC (0,0), which is only the
+// visual center if the canvas's actual displayed size matches what it was rendered at).
+window.visualViewport?.addEventListener("resize", handleResize);
+
+// Without an explicit webglcontextlost handler that calls preventDefault(), a lost context
+// (common on mobile under memory/thermal pressure — reproduced directly in this project's own
+// headless-Chrome test tooling) is NEVER automatically restored; the page just silently stops
+// rendering forever, indistinguishable from a full freeze, until the user manually reloads.
+// Reloading here is a deliberate, simple recovery — reconstructing every GPU resource (textures,
+// geometries, shaders across 4 maps) by hand after a real restoration event is far more failure-
+// prone than just starting over, and this is a casual game where losing an in-progress match to
+// an already-rare context loss is an acceptable trade for actually recovering instead of hanging.
+renderer.domElement.addEventListener(
+  "webglcontextlost",
+  (e) => {
+    e.preventDefault();
+    console.warn("WebGL context lost — reloading to recover.");
+    window.location.reload();
+  },
+  false
+);
 
 // The active map's meshes/lighting/fog + collision data — rebuilt by loadMap() whenever a
 // match starts with a different map selected, so `obstacles`/`obstacleMeshes` must be `let`
@@ -192,6 +219,10 @@ const el = {
   hideCrosshairAimingCheckbox: document.getElementById("hide-crosshair-aiming-checkbox"),
   toggleAimCheckbox: document.getElementById("toggle-aim-checkbox"),
   toggleCrouchCheckbox: document.getElementById("toggle-crouch-checkbox"),
+  lookSensitivitySlider: document.getElementById("look-sensitivity-slider"),
+  lookSensitivityValue: document.getElementById("look-sensitivity-value"),
+  scopedSensitivitySlider: document.getElementById("scoped-sensitivity-slider"),
+  scopedSensitivityValue: document.getElementById("scoped-sensitivity-value"),
   menu: document.getElementById("menu"),
   classSelectScreen: document.getElementById("class-select-screen"),
   classPicker: document.getElementById("class-picker"),
@@ -223,8 +254,21 @@ const el = {
   collisionBoxIndicator: document.getElementById("collision-box-indicator"),
   flyModeIndicator: document.getElementById("fly-mode-indicator"),
   crosshair: document.getElementById("crosshair"),
+  fullscreenBtn: document.getElementById("fullscreen-btn"),
   scopeVignette: document.getElementById("scope-vignette"),
   hud: document.getElementById("hud"),
+  touchControls: document.getElementById("touch-controls"),
+  touchLookZone: document.getElementById("touch-look-zone"),
+  touchMoveZone: document.getElementById("touch-move-zone"),
+  touchJoystickBase: document.getElementById("touch-joystick-base"),
+  touchJoystickThumb: document.getElementById("touch-joystick-thumb"),
+  touchFireBtn: document.getElementById("touch-fire-btn"),
+  touchAimBtn: document.getElementById("touch-aim-btn"),
+  touchJumpBtn: document.getElementById("touch-jump-btn"),
+  touchAbilityBtn: document.getElementById("touch-ability-btn"),
+  touchPauseBtn: document.getElementById("touch-pause-btn"),
+  rotateDevicePrompt: document.getElementById("rotate-device-prompt"),
+  forceTouchControlsCheckbox: document.getElementById("force-touch-controls-checkbox"),
   debugPanel: document.getElementById("debug-panel"),
   dbgFps: document.getElementById("dbg-fps"),
   dbgFrame: document.getElementById("dbg-frame"),
@@ -238,9 +282,37 @@ const el = {
   dbgHeap: document.getElementById("dbg-heap"),
 };
 
+// Fullscreen toggle — available on every screen (not just in-game), since mobile browser
+// chrome (address bar/tab bar) eating into the usable viewport is the whole problem this
+// solves, and that's just as true on the landing/lobby screens as it is mid-match. Requires a
+// real user gesture to invoke (this click IS one), so it can't be triggered programmatically.
+el.fullscreenBtn.addEventListener("click", () => {
+  if (document.fullscreenElement) {
+    document.exitFullscreen();
+  } else {
+    document.documentElement.requestFullscreen().catch(() => {
+      // Some browsers (older mobile Safari, or a page embedded in an iframe without the
+      // allowfullscreen attribute) reject this outright — nothing further to do but leave the
+      // button available to try again; the button's own hidden state below already accounts
+      // for fullscreenEnabled being false entirely.
+    });
+  }
+});
+document.addEventListener("fullscreenchange", () => {
+  el.fullscreenBtn.classList.toggle("is-fullscreen", !!document.fullscreenElement);
+});
+if (!document.fullscreenEnabled) el.fullscreenBtn.style.display = "none";
+
 const SETTINGS_KEY = "perimeterBreach.settings";
 
-const DEFAULT_SETTINGS = { hideCrosshairWhileAiming: false, toggleAim: false, toggleCrouch: false };
+const DEFAULT_SETTINGS = {
+  hideCrosshairWhileAiming: false,
+  toggleAim: false,
+  toggleCrouch: false,
+  lookSensitivity: 1,
+  scopedSensitivity: 0.4, // matches this project's pre-existing (formerly hardcoded) scoped-in feel
+  forceTouchControls: false, // manual override — lets an ambiguous/hybrid device force touch UI on or off
+};
 
 function loadSettings() {
   try {
@@ -254,6 +326,11 @@ const settings = loadSettings();
 el.hideCrosshairAimingCheckbox.checked = settings.hideCrosshairWhileAiming;
 el.toggleAimCheckbox.checked = settings.toggleAim;
 el.toggleCrouchCheckbox.checked = settings.toggleCrouch;
+el.lookSensitivitySlider.value = settings.lookSensitivity;
+el.lookSensitivityValue.textContent = settings.lookSensitivity.toFixed(2);
+el.scopedSensitivitySlider.value = settings.scopedSensitivity;
+el.scopedSensitivityValue.textContent = settings.scopedSensitivity.toFixed(2);
+el.forceTouchControlsCheckbox.checked = settings.forceTouchControls;
 
 el.hideCrosshairAimingCheckbox.addEventListener("change", () => {
   settings.hideCrosshairWhileAiming = el.hideCrosshairAimingCheckbox.checked;
@@ -278,6 +355,54 @@ el.toggleCrouchCheckbox.addEventListener("change", () => {
   // "cancel" either) with no way to stand back up short of pressing C again.
   input.crouch = false;
 });
+
+el.lookSensitivitySlider.addEventListener("input", () => {
+  settings.lookSensitivity = Number(el.lookSensitivitySlider.value);
+  el.lookSensitivityValue.textContent = settings.lookSensitivity.toFixed(2);
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+});
+
+el.scopedSensitivitySlider.addEventListener("input", () => {
+  settings.scopedSensitivity = Number(el.scopedSensitivitySlider.value);
+  el.scopedSensitivityValue.textContent = settings.scopedSensitivity.toFixed(2);
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+});
+
+el.forceTouchControlsCheckbox.addEventListener("change", () => {
+  settings.forceTouchControls = el.forceTouchControlsCheckbox.checked;
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  touchControls.setForced(settings.forceTouchControls);
+});
+
+// Touch is a pure input-translation layer (see touchControls.js) — every button callback below
+// is the exact same function keyboard/mouse already call, not new gameplay logic.
+const touchControls = new TouchControls({
+  camera,
+  controls,
+  input,
+  moveZone: el.touchMoveZone,
+  lookZone: el.touchLookZone,
+  joystickBase: el.touchJoystickBase,
+  joystickThumb: el.touchJoystickThumb,
+  buttons: {
+    fire: { el: el.touchFireBtn, onStart: handleFireStart, onEnd: handleFireEnd, dragToAim: true },
+    aim: { el: el.touchAimBtn, onStart: handleAimStart, onEnd: handleAimEnd },
+    jump: { el: el.touchJumpBtn, onStart: () => { input.jumpQueued = true; } },
+    ability: { el: el.touchAbilityBtn, onStart: () => useAbility() },
+    pause: { el: el.touchPauseBtn, onStart: () => enterPausedState() },
+  },
+  forced: settings.forceTouchControls,
+});
+
+// Landscape-only while actually playing (per confirmed mobile-controls scope) — the touch
+// joystick/button layout assumes a wide screen. Menus/lobby screens are plain centered panels
+// that work fine in portrait, so this deliberately only blocks the in-game state, not browsing.
+const portraitMedia = window.matchMedia("(orientation: portrait)");
+function updateRotatePrompt() {
+  const shouldShow = touchControls.active && portraitMedia.matches && state === "playing";
+  el.rotateDevicePrompt.classList.toggle("hidden", !shouldShow);
+}
+portraitMedia.addEventListener("change", updateRotatePrompt);
 
 let settingsReturnTo = el.landing;
 
@@ -366,7 +491,7 @@ function resetPlayerState(x, z, y = 1.7) {
   player.stamina = STAMINA_MAX;
   player.staminaLocked = false;
   leftMouseHeld = false;
-  controls.pointerSpeed = 1;
+  controls.pointerSpeed = settings.lookSensitivity;
   el.scopeVignette.classList.add("hidden");
 
   loadout.reset();
@@ -414,11 +539,28 @@ function showOverlay(title, message, isLose) {
   el.endScreen.classList.remove("hidden");
 }
 
+// Shows/hides the HUD, crosshair, and touch-control overlay together as one "are we actually
+// in gameplay right now" unit — three separate call sites each toggling all three individually
+// is exactly the kind of divergence-prone duplication that caused a real bug earlier in this
+// project (a multi-site assignment that `replace_all` only partially updated), so this is one
+// place instead of three. `touchControls`' own visibility is still separately gated by the
+// `touch-controls-active` body class (see touchControls.js) — setting `display: ""` here just
+// defers to that CSS rule rather than forcing it visible on desktop.
+function showGameplayUI() {
+  el.hud.style.display = "";
+  el.crosshair.style.display = "";
+  el.touchControls.style.display = "";
+}
+function hideGameplayUI() {
+  el.hud.style.display = "none";
+  el.crosshair.style.display = "none";
+  el.touchControls.style.display = "none";
+}
+
 function endGame(won) {
   state = won ? "won" : "lost";
   controls.unlock();
-  el.hud.style.display = "none";
-  el.crosshair.style.display = "none";
+  hideGameplayUI();
   if (won) {
     showOverlay("Perimeter Secured", `${TOTAL_KILLS_TO_WIN} hostiles eliminated. The outpost holds.`, false);
   } else {
@@ -936,12 +1078,11 @@ el.spawnInBtn.addEventListener("click", () => {
   } else if (classSelectSpawnFresh) {
     sounds.resume();
     showMenuBackdrop = false;
-    el.hud.style.display = "";
-    el.crosshair.style.display = "";
+    showGameplayUI();
     resetGame();
-    controls.lock(true);
+    requestPlayLock();
   } else {
-    controls.lock(true);
+    requestPlayLock();
   }
 });
 
@@ -1047,12 +1188,11 @@ function beginMatch(config, startedAt) {
 // handler) — both are "you appear somewhere new with a clean slate" in exactly the same way.
 function spawnIntoMatch() {
   showMenuBackdrop = false;
-  el.hud.style.display = "";
-  el.crosshair.style.display = "";
+  showGameplayUI();
   const spawn = randomSpawnPoint(12, world.arenaBound);
   resetPlayerState(spawn.x, spawn.z);
   posBroadcastAccum = 0;
-  controls.lock(true);
+  requestPlayLock();
 }
 
 // Applies damage to the LOCAL player only — never touches anyone else's health. A hit
@@ -1202,8 +1342,7 @@ function endMatch(winnerId) {
   inMatch = false;
   state = "menu"; // set before unlock() so the pause-hint doesn't pop up, same trick endGame() uses
   controls.unlock();
-  el.hud.style.display = "none";
-  el.crosshair.style.display = "none";
+  hideGameplayUI();
   el.respawnOverlay.classList.add("hidden");
   el.scoreboardPanel.classList.add("hidden");
   scoreboardVisible = false;
@@ -1275,8 +1414,7 @@ function endMatchAbruptly() {
   controls.unlock();
   showMenuBackdrop = true;
   loadout.setForceHidden(true);
-  el.hud.style.display = "none";
-  el.crosshair.style.display = "none";
+  hideGameplayUI();
   // Defensive: a disconnect could land while the class-select screen is up (match started,
   // but the player hadn't hit Spawn In yet) — showMpScreen only manages the lobby screens,
   // not this one, so it'd otherwise be left showing on top of whatever comes next.
@@ -1298,14 +1436,17 @@ el.restartBtn.addEventListener("click", () => {
   showClassSelect(true);
 });
 
-controls.addEventListener("lock", () => {
+// Extracted so touch-mode code paths (no Pointer Lock API involved at all) can reach the
+// exact same state transition directly, instead of only ever firing from a real lock/unlock
+// browser event.
+function enterPlayingState() {
   el.menu.classList.add("hidden");
   el.classSelectScreen.classList.add("hidden");
   el.pauseHint.classList.add("hidden");
   state = "playing";
-});
+}
 
-controls.addEventListener("unlock", () => {
+function enterPausedState() {
   if (state === "playing") {
     state = "paused";
     el.pauseHint.classList.remove("hidden");
@@ -1313,11 +1454,22 @@ controls.addEventListener("unlock", () => {
     aimHeld = false;
     if (settings.hideCrosshairWhileAiming) el.crosshair.style.display = "";
   }
-});
+}
 
-el.resumeBtn.addEventListener("click", () => {
-  controls.lock(true);
-});
+// Touch devices never engage the Pointer Lock API at all (no cursor to lock, and it's
+// unsupported on some mobile browsers anyway) — every call site that used to just call
+// controls.lock(true) to enter gameplay now goes through this, so it reaches the exact same
+// enterPlayingState() transition directly on touch instead of waiting on a "lock" event that
+// will never fire.
+function requestPlayLock() {
+  if (touchControls.active) enterPlayingState();
+  else controls.lock(true);
+}
+
+controls.addEventListener("lock", enterPlayingState);
+controls.addEventListener("unlock", enterPausedState);
+
+el.resumeBtn.addEventListener("click", requestPlayLock);
 
 el.changeClassBtn.addEventListener("click", () => {
   el.pauseHint.classList.add("hidden");
@@ -1330,8 +1482,7 @@ el.exitToMenuBtn.addEventListener("click", () => {
   loadout.setForceHidden(true);
   el.pauseHint.classList.add("hidden");
   el.scopeVignette.classList.add("hidden");
-  el.hud.style.display = "none";
-  el.crosshair.style.display = "none";
+  hideGameplayUI();
 
   if (inMatch) {
     leaveMatchToRoom(); // stays connected to the room — a single-player exit disconnects nothing to keep
@@ -1448,9 +1599,7 @@ window.addEventListener("keydown", (e) => {
       }
       break;
     case "KeyR":
-      if (!e.repeat && state === "playing" && !grenadeHeld) {
-        if (loadout.startReload() && aimHeld) setAiming(false);
-      }
+      if (!e.repeat) doReload();
       break;
     case "KeyG":
       if (!e.repeat && state === "playing") startHoldingGrenade();
@@ -1878,21 +2027,37 @@ function setAiming(aiming) {
   if (settings.hideCrosshairWhileAiming) el.crosshair.style.display = aiming ? "none" : "";
 }
 
-window.addEventListener("mousedown", (e) => {
+function doReload() {
   if (state !== "playing" || grenadeHeld) return;
-  if (e.button === 0) {
-    leftMouseHeld = true;
-    fireWeapon();
-  }
-  if (e.button === 2) {
-    setAiming(settings.toggleAim ? !aimHeld : true);
-  }
+  if (loadout.startReload() && aimHeld) setAiming(false);
+}
+
+// Extracted so the touch Fire/Aim buttons drive the exact same state the mouse handlers
+// below do, instead of duplicating the state === "playing"/grenadeHeld guard and the
+// toggleAim branching a second time.
+function handleFireStart() {
+  if (state !== "playing" || grenadeHeld) return;
+  leftMouseHeld = true;
+  fireWeapon();
+}
+function handleFireEnd() {
+  leftMouseHeld = false;
+}
+function handleAimStart() {
+  if (state !== "playing" || grenadeHeld) return;
+  setAiming(settings.toggleAim ? !aimHeld : true);
+}
+function handleAimEnd() {
+  if (!settings.toggleAim) setAiming(false);
+}
+
+window.addEventListener("mousedown", (e) => {
+  if (e.button === 0) handleFireStart();
+  if (e.button === 2) handleAimStart();
 });
 window.addEventListener("mouseup", (e) => {
-  if (e.button === 0) leftMouseHeld = false;
-  if (e.button === 2 && !settings.toggleAim) {
-    setAiming(false);
-  }
+  if (e.button === 0) handleFireEnd();
+  if (e.button === 2) handleAimEnd();
 });
 
 window.addEventListener(
@@ -1956,11 +2121,23 @@ function animate() {
   const dt = Math.min(0.05, rawDt);
   const elapsed = clock.getElapsedTime();
 
+  updateRotatePrompt();
+
   if (state === "playing") {
+    // Touch has no dedicated sprint button (per the confirmed mobile-controls scope) — sprint
+    // auto-engages whenever the joystick shows any movement, with the existing stamina system
+    // (drain/lock/regen) still fully gating it exactly as it does for a held Shift key.
+    const touchMoving = Math.abs(input.moveX || 0) > 0.05 || Math.abs(input.moveZ || 0) > 0.05;
+    if (touchControls.active) input.sprint = touchMoving || input.forward || input.back || input.left || input.right;
+
     if (respawnTimer <= 0) player.update(dt, input, obstacles, world.arenaBound);
 
-    const isMoving = input.forward || input.back || input.left || input.right;
+    const isMoving = touchMoving || input.forward || input.back || input.left || input.right;
     loadout.update(dt, elapsed, isMoving);
+
+    // Touch also has no manual reload button — auto-triggers the instant the mag is empty,
+    // via the exact same doReload() the R key calls.
+    if (touchControls.active && respawnTimer <= 0 && loadout.current.slot.ammo === 0) doReload();
 
     if (isMoving && player.onGround) {
       footstepTimer -= dt;
@@ -1992,7 +2169,11 @@ function animate() {
     const targetFov = BASE_FOV + (loadout.current.def.aimFov - BASE_FOV) * loadout.current.view.aimProgress;
     camera.fov = targetFov + fovKick;
     camera.updateProjectionMatrix();
-    controls.pointerSpeed = 1 - loadout.current.view.aimProgress * 0.6;
+    // Blends from the general look-sensitivity setting down to the scoped-sensitivity setting
+    // as aimProgress goes 0 -> 1, matching the pre-existing hardcoded (1 -> 0.4) feel exactly
+    // when both settings are left at their defaults.
+    controls.pointerSpeed =
+      settings.lookSensitivity - (settings.lookSensitivity - settings.scopedSensitivity) * loadout.current.view.aimProgress;
     el.scopeVignette.classList.toggle("hidden", !loadout.current.view.scopedIn);
 
     if (grenadeCooldown > 0) grenadeCooldown -= dt;

@@ -62,7 +62,7 @@ export function predictGrenadeArc(origin, velocity, duration, steps = 24) {
 }
 
 const ROCKET_GROUND_CLEARANCE = 0.06;
-const rocketGeo = new THREE.CylinderGeometry(0.04, 0.05, 0.28, 8);
+const rocketGeo = new THREE.CylinderGeometry(0.08, 0.1, 0.56, 8); // 2x the original 0.04/0.05/0.28
 const rocketMat = new THREE.MeshStandardMaterial({
   color: 0x2a2a2a,
   emissive: 0xff6a2a,

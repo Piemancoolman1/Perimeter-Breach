@@ -79,8 +79,14 @@ export class Player {
     forward.normalize();
     const right = new THREE.Vector3().crossVectors(forward, this.camera.up).normalize();
 
-    let moveX = 0;
-    let moveZ = 0;
+    // input.moveX/moveZ are an optional analog contribution (-1..1 each) from a touch
+    // joystick — keyboard only ever sets the boolean fields below. Clamping the combined
+    // vector to length 1 (rather than always normalizing) preserves keyboard behavior
+    // exactly (boolean-only input is always length 1 cardinal or sqrt(2) diagonal pre-clamp,
+    // and clamping sqrt(2) down to 1 is identical to the old unconditional normalize) while
+    // letting a partial joystick tilt pass through un-boosted for real analog walk/run speed.
+    let moveX = input.moveX || 0;
+    let moveZ = input.moveZ || 0;
     if (input.forward) moveZ += 1;
     if (input.back) moveZ -= 1;
     if (input.right) moveX += 1;
@@ -89,7 +95,7 @@ export class Player {
     const moveVec = new THREE.Vector3();
     moveVec.addScaledVector(forward, moveZ);
     moveVec.addScaledVector(right, moveX);
-    if (moveVec.lengthSq() > 0) moveVec.normalize();
+    if (moveVec.lengthSq() > 1) moveVec.normalize();
 
     this.crouching = !!input.crouch;
     const wantsSprint = input.sprint && !this.crouching;

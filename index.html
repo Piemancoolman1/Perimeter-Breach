@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Perimeter Breach</title>
   </head>
   <body>
@@ -11,6 +11,8 @@
       <canvas id="scene"></canvas>
 
       <div id="crosshair"></div>
+
+      <button id="fullscreen-btn" aria-label="Toggle fullscreen">&#9974;</button>
 
       <div id="scope-vignette" class="hidden">
         <div class="scope-hole">
@@ -50,6 +52,27 @@
             <span class="label" id="ability-label">Ability</span>
             <span id="ability-status" class="value">Q</span>
           </div>
+        </div>
+      </div>
+
+      <div id="touch-controls">
+        <div id="touch-look-zone"></div>
+        <div id="touch-move-zone"></div>
+        <div id="touch-joystick-base">
+          <div id="touch-joystick-thumb"></div>
+        </div>
+        <button id="touch-pause-btn" class="touch-btn touch-btn-pause" aria-label="Pause">II</button>
+        <button id="touch-ability-btn" class="touch-btn touch-btn-ability" aria-label="Ability">Q</button>
+        <button id="touch-jump-btn" class="touch-btn touch-btn-jump" aria-label="Jump">JUMP</button>
+        <button id="touch-aim-btn" class="touch-btn touch-btn-aim" aria-label="Aim">AIM</button>
+        <button id="touch-fire-btn" class="touch-btn touch-btn-fire" aria-label="Fire">FIRE</button>
+      </div>
+
+      <div id="rotate-device-prompt" class="overlay hidden">
+        <div class="panel small">
+          <div class="rotate-icon">&#8635;</div>
+          <h1>Rotate Your Device</h1>
+          <p class="subtitle">Perimeter Breach plays in landscape</p>
         </div>
       </div>
 
@@ -229,6 +252,20 @@
           <label class="settings-row">
             <input type="checkbox" id="toggle-crouch-checkbox" />
             <span>Toggle crouch (press, instead of hold)</span>
+          </label>
+          <div class="settings-row sensitivity-row">
+            <span class="sensitivity-label">Look sensitivity</span>
+            <input type="range" id="look-sensitivity-slider" min="0.2" max="3" step="0.05" />
+            <span id="look-sensitivity-value" class="sensitivity-value"></span>
+          </div>
+          <div class="settings-row sensitivity-row">
+            <span class="sensitivity-label">Scoped sensitivity</span>
+            <input type="range" id="scoped-sensitivity-slider" min="0.2" max="3" step="0.05" />
+            <span id="scoped-sensitivity-value" class="sensitivity-value"></span>
+          </div>
+          <label class="settings-row">
+            <input type="checkbox" id="force-touch-controls-checkbox" />
+            <span>Force touch controls (override auto-detection)</span>
           </label>
           <button id="settings-back-btn">Back</button>
         </div>
