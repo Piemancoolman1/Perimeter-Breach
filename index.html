@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Perimeter Breach</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene"></canvas>
+
+      <div id="crosshair"></div>
+
+      <div id="scope-vignette" class="hidden">
+        <div class="scope-hole">
+          <div class="scope-reticle">
+            <div class="scope-line vertical top"></div>
+            <div class="scope-line vertical bottom"></div>
+            <div class="scope-line horizontal left"></div>
+            <div class="scope-line horizontal right"></div>
+            <div class="scope-center-dot"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="hud">
+        <div class="hud-row">
+          <div class="stat">
+            <span class="label">Core</span>
+            <div class="bar"><div id="health-fill" class="fill health"></div></div>
+          </div>
+          <div class="stat">
+            <span class="label">Stamina</span>
+            <div class="bar"><div id="stamina-fill" class="fill stamina"></div></div>
+          </div>
+          <div class="stat">
+            <span class="label">Kills</span>
+            <span id="kills" class="value">0 / 20</span>
+          </div>
+          <div class="stat">
+            <span class="label" id="weapon-label">AK-47</span>
+            <span id="ammo-text" class="value">30 / 30</span>
+          </div>
+          <div class="stat">
+            <span class="label">Grenades</span>
+            <span id="grenade-count" class="value">3</span>
+          </div>
+          <div class="stat">
+            <span class="label" id="ability-label">Ability</span>
+            <span id="ability-status" class="value">Q</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="reload-indicator" class="hidden">RELOADING</div>
+
+      <div id="invincible-vignette" class="hidden"></div>
+      <div id="invincible-indicator" class="hidden">SHIELDED <span id="invincible-timer">3s</span></div>
+
+      <div id="collision-box-indicator" class="hidden">COLLISION BOXES (F4)</div>
+      <div id="fly-mode-indicator" class="hidden">FLY MODE (F5) — Space up / Shift down</div>
+
+      <div id="respawn-overlay" class="hidden">
+        <div class="respawn-message">
+          <div id="respawn-title">Eliminated</div>
+          <div id="respawn-timer">Respawning in 3s</div>
+        </div>
+      </div>
+
+      <div id="scoreboard-panel" class="hidden">
+        <div class="scoreboard-title">Scoreboard <span class="scoreboard-hint">(Tab)</span></div>
+        <ul id="scoreboard-list"></ul>
+      </div>
+
+      <div id="hit-flash"></div>
+
+      <div id="debug-panel" class="hidden">
+        <div class="debug-graph-label">
+          <span>Frame time (ms)</span><span id="dbg-graph-legend"></span>
+        </div>
+        <canvas id="dbg-graph-frame" width="280" height="64"></canvas>
+
+        <div class="debug-graph-label">
+          <span>GPU geometries resident (leak watch)</span><span id="dbg-geo-legend"></span>
+        </div>
+        <canvas id="dbg-graph-geo" width="280" height="40"></canvas>
+
+        <div class="debug-graph-label">
+          <span>Enemies alive / shot FX</span><span id="dbg-load-legend"></span>
+        </div>
+        <canvas id="dbg-graph-load" width="280" height="40"></canvas>
+
+        <div class="debug-row"><span>FPS</span><span id="dbg-fps">0</span></div>
+        <div class="debug-row"><span>Frame (avg / max)</span><span id="dbg-frame">0 / 0 ms</span></div>
+        <div class="debug-row"><span>Draw calls</span><span id="dbg-calls">0</span></div>
+        <div class="debug-row"><span>Triangles</span><span id="dbg-tris">0</span></div>
+        <div class="debug-row"><span>Geometries</span><span id="dbg-geo">0</span></div>
+        <div class="debug-row"><span>Textures</span><span id="dbg-tex">0</span></div>
+        <div class="debug-row"><span>Lights (enemies+sun+fx)</span><span id="dbg-lights">0</span></div>
+        <div class="debug-row"><span>Enemies alive</span><span id="dbg-enemies">0</span></div>
+        <div class="debug-row"><span>Active shot FX</span><span id="dbg-fx">0</span></div>
+        <div class="debug-row"><span>JS heap</span><span id="dbg-heap">n/a</span></div>
+        <div class="debug-hint">F3 to toggle · cyan tick = shot fired · red tick = enemy killed</div>
+      </div>
+
+      <div id="landing" class="overlay">
+        <div class="panel">
+          <h1>PERIMETER BREACH</h1>
+          <p class="subtitle">Choose a mode</p>
+          <div class="landing-buttons">
+            <button id="singleplayer-btn">Single Player</button>
+            <button id="multiplayer-btn">Multiplayer</button>
+            <button id="settings-btn">Settings</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="multiplayer-screen" class="overlay hidden">
+        <div class="panel">
+          <h1>Multiplayer</h1>
+          <p class="subtitle">Enter a name to continue</p>
+          <div class="form-row">
+            <label for="player-name-input">Player name</label>
+            <input type="text" id="player-name-input" maxlength="24" placeholder="Your name" />
+          </div>
+          <p id="mp-connect-error" class="mp-error hidden"></p>
+          <div class="landing-buttons">
+            <button id="create-room-btn">Create Room</button>
+            <button id="browse-rooms-btn">Browse Rooms</button>
+            <button id="mp-back-btn">Back</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="create-room-screen" class="overlay hidden">
+        <div class="panel">
+          <h1>Create Room</h1>
+          <p class="subtitle">Set up a lobby</p>
+          <div class="form-row">
+            <label for="room-name-input">Room name</label>
+            <input type="text" id="room-name-input" maxlength="40" placeholder="e.g. Friday Night Squad" />
+          </div>
+          <div class="form-row">
+            <label>Visibility</label>
+            <div class="visibility-toggle">
+              <button type="button" id="visibility-public-btn" class="visibility-option selected">Public</button>
+              <button type="button" id="visibility-private-btn" class="visibility-option">Private</button>
+            </div>
+          </div>
+          <div class="form-row hidden" id="room-password-create-row">
+            <label for="room-password-create-input">Password</label>
+            <input type="password" id="room-password-create-input" maxlength="64" placeholder="Required for private rooms" />
+          </div>
+          <p id="create-room-error" class="mp-error hidden"></p>
+          <div class="landing-buttons">
+            <button id="create-room-submit-btn">Create</button>
+            <button id="create-room-back-btn">Back</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="browse-rooms-screen" class="overlay hidden">
+        <div class="panel wide">
+          <h1>Browse Rooms</h1>
+          <p class="subtitle">Pick a room to join</p>
+          <p id="browse-error" class="mp-error hidden"></p>
+          <div id="room-list" class="room-list"></div>
+          <div class="form-row hidden" id="room-password-row">
+            <label for="room-password-input">Password for "<span id="room-password-room-name"></span>"</label>
+            <input type="password" id="room-password-input" maxlength="64" />
+          </div>
+          <div class="landing-buttons">
+            <button id="room-password-join-btn" class="hidden">Join Room</button>
+            <button id="rooms-refresh-btn">Refresh</button>
+            <button id="browse-back-btn">Back</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="room-screen" class="overlay hidden">
+        <div class="panel">
+          <h1 id="room-screen-name">Room</h1>
+          <p class="subtitle">Waiting room</p>
+          <ul id="room-player-list" class="player-list"></ul>
+
+          <div id="match-config" class="hidden">
+            <div class="visibility-toggle">
+              <button type="button" id="mode-kills-btn" class="visibility-option selected">Kill Target</button>
+              <button type="button" id="mode-time-btn" class="visibility-option">Time Limit</button>
+              <button type="button" id="mode-ffa-btn" class="visibility-option">Free-for-all</button>
+            </div>
+            <div class="form-row" id="match-config-number-row">
+              <label id="match-config-number-label" for="match-config-number-input">Kills to win</label>
+              <input type="number" id="match-config-number-input" min="1" max="100" value="15" />
+            </div>
+
+            <div class="form-row">
+              <label>Map</label>
+              <div class="visibility-toggle map-toggle" id="map-picker">
+                <button type="button" class="visibility-option map-option selected" data-map-id="grassland">Grassland Perimeter</button>
+                <button type="button" class="visibility-option map-option" data-map-id="frostbite">Frostbite Hollow</button>
+                <button type="button" class="visibility-option map-option" data-map-id="dunes">Sundrift Dunes</button>
+                <button type="button" class="visibility-option map-option" data-map-id="nightfall">Nightfall Thicket</button>
+              </div>
+              <div id="map-description" class="map-description"></div>
+            </div>
+          </div>
+
+          <div class="landing-buttons">
+            <button id="start-match-btn">Start Match</button>
+            <button id="leave-room-btn">Leave Room</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="settings-screen" class="overlay hidden">
+        <div class="panel">
+          <h1>Settings</h1>
+          <p class="subtitle">Gameplay preferences</p>
+          <label class="settings-row">
+            <input type="checkbox" id="hide-crosshair-aiming-checkbox" />
+            <span>Hide crosshair while aiming</span>
+          </label>
+          <label class="settings-row">
+            <input type="checkbox" id="toggle-aim-checkbox" />
+            <span>Toggle aim (press to scope, instead of hold)</span>
+          </label>
+          <label class="settings-row">
+            <input type="checkbox" id="toggle-crouch-checkbox" />
+            <span>Toggle crouch (press, instead of hold)</span>
+          </label>
+          <button id="settings-back-btn">Back</button>
+        </div>
+      </div>
+
+      <div id="menu" class="overlay hidden">
+        <div class="panel">
+          <h1>PERIMETER BREACH</h1>
+          <p class="subtitle">Hold the outpost clearing</p>
+          <ul class="briefing">
+            <li><b>WASD</b> move &nbsp; <b>Mouse</b> look &nbsp; <b>Space</b> jump (x2)</li>
+            <li><b>Click</b> fire &nbsp; <b>Right-click</b> aim &nbsp; <b>Shift</b> sprint &nbsp; <b>C</b> crouch</li>
+            <li><b>R</b> reload</li>
+            <li><b>Hold G</b> aim the throw arc &nbsp; <b>Release G</b> throw</li>
+            <li><b>Q</b> use your class ability</li>
+            <li>Pick a class next — each one locks you to a different weapon and ability</li>
+            <li>Eliminate <span class="accent-highlight">20 hostiles</span> to secure the perimeter</li>
+            <li>Hostiles will hunt you on foot — hold them off or fall back</li>
+          </ul>
+          <button id="start-btn">Click to Start</button>
+        </div>
+      </div>
+
+      <div id="class-select-screen" class="overlay hidden">
+        <div class="panel">
+          <h1>Choose Your Class</h1>
+          <p class="subtitle">Pick a loadout, then spawn in</p>
+          <div class="visibility-toggle class-toggle" id="class-picker">
+            <button type="button" class="visibility-option class-option" data-class-id="scout">Scout</button>
+            <button type="button" class="visibility-option class-option" data-class-id="assault">Assault</button>
+            <button type="button" class="visibility-option class-option" data-class-id="recon">Recon</button>
+            <button type="button" class="visibility-option class-option" data-class-id="demolition">Demolition</button>
+          </div>
+          <div id="class-description" class="class-description"></div>
+          <button id="spawn-in-btn">Spawn In</button>
+        </div>
+      </div>
+
+      <div id="pause-hint" class="overlay hidden">
+        <div class="panel small">
+          <h2>Paused</h2>
+          <div class="landing-buttons">
+            <button id="resume-btn">Resume</button>
+            <button id="change-class-btn">Change Class</button>
+            <button id="pause-settings-btn">Settings</button>
+            <button id="exit-to-menu-btn">Exit to Main Menu</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="end-screen" class="overlay hidden">
+        <div class="panel">
+          <h1 id="end-title">Mission Complete</h1>
+          <p id="end-message" class="subtitle"></p>
+          <ul id="end-scoreboard-list" class="player-list hidden"></ul>
+          <button id="restart-btn">Restart</button>
+          <button id="back-to-room-btn" class="hidden">Back to Room</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

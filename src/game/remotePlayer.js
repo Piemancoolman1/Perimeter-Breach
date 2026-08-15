@@ -1,0 +1,244 @@
+import * as THREE from "three";
+import {
+  sharedHumanoidParts,
+  buildWeaponProp,
+  buildHumanoidBody,
+  buildHealthBar,
+  updateHealthBarSprite,
+  updateNameplateVisibility,
+  breakApartHumanoid,
+  clamp,
+  WALK_LEG_SWING,
+  WALK_ARM_SWING,
+  AIM_ARM_ANGLE,
+  WEAPON_FLASH_DURATION,
+  WEAPON_IDS,
+} from "./humanoidParts.js";
+
+// The gun arm stays raised into a ready stance permanently (never drops back to hanging at
+// the sides, per explicit request) — only a small sway layers on top while walking, and the
+// whole pose tilts with the player's actual look pitch so a peer can see roughly where
+// someone is aiming without needing them to fire a shot. The off-hand arm is unused (holds
+// nothing) and keeps its normal hanging walk-swing instead — only the arm actually holding
+// the gun needs to read as "aiming."
+const IDLE_ARM_SWAY = 0.12;
+const ARM_PITCH_SCALE = 0.6;
+const ARM_ANGLE_MIN = 0.3;
+const ARM_ANGLE_MAX = 2.3;
+const HEAD_PITCH_SCALE = 0.8;
+const HEAD_PITCH_MAX = 1.1;
+
+// Distinct clothing tints cycled by join order so peers are told apart at a glance —
+// separate from the name tag, which needs to be read up close to matter.
+const PLAYER_COLORS = [0x3a5f7a, 0x7a3a3a, 0x7a6a3a, 0x5a3a7a, 0x3a7a6a, 0x7a3a6a, 0x6a6a3a, 0x4a7a3a];
+
+const POS_LERP_SPEED = 12;
+const ROT_LERP_SPEED = 10;
+
+function buildNameTagSprite(name) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "rgba(6, 14, 18, 0.72)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.font = "bold 34px sans-serif";
+  ctx.fillStyle = "#e8f6ff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(name).slice(0, 24), canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0.9, 0.9 * (canvas.height / canvas.width), 1);
+  sprite.renderOrder = 1;
+  return { sprite, mat, texture };
+}
+
+// A networked peer's avatar: no AI, but otherwise built from the same shared parts as an
+// Enemy (entities.js) — holds one prop per weapon type (built once, toggled visible on
+// switch rather than rebuilt) so it always shows whichever weapon that peer actually has
+// equipped, holds a permanent ready/aiming stance that tilts up/down with the peer's actual
+// look pitch, and can be blown apart into ragdoll pieces on elimination the same way an
+// Enemy can. Position/rotation are lerped toward the latest network update rather than
+// snapping, since updates only arrive at ~15Hz.
+export class RemotePlayer {
+  constructor(scene, id, name, colorIndex, x = 0, z = 0) {
+    this.id = id;
+    this.name = name;
+    this.health = 100;
+    this.maxHealth = 100;
+    this.isMoving = false;
+    this.pitch = 0; // current (lerped) up/down look angle, mirrored from the owner's camera
+    this.targetPitch = 0;
+    this.walkPhase = Math.random() * Math.PI * 2;
+    this.swingAmount = 0;
+    this.gunFlashTime = 0;
+
+    this.targetPos = new THREE.Vector3(x, 0, z);
+    this.targetRotY = 0;
+
+    const s = sharedHumanoidParts();
+    const clothingMat = new THREE.MeshStandardMaterial({
+      color: PLAYER_COLORS[colorIndex % PLAYER_COLORS.length],
+      roughness: 0.82,
+      metalness: 0.08,
+      emissive: 0x141a10,
+    });
+    const built = buildHumanoidBody(s, { clothingMat });
+    this.group = built.group;
+    this.visual = built.visual;
+    this.torso = built.torso;
+    this.head = built.head;
+    this.leftLeg = built.leftLeg;
+    this.rightLeg = built.rightLeg;
+    this.leftArm = built.leftArm;
+    this.rightArm = built.rightArm;
+
+    // Whole-limb chunks used for the death ragdoll — same grouping Enemy uses, so a kill
+    // "explodes" a player the same way it explodes an AI enemy.
+    this.parts = [this.torso, this.head, this.leftLeg, this.rightLeg, this.leftArm, this.rightArm];
+
+    this.weaponId = "pistol";
+    this.weaponProps = {};
+    for (const wid of WEAPON_IDS) {
+      const prop = buildWeaponProp(s, wid);
+      prop.group.visible = wid === this.weaponId;
+      this.rightArm.add(prop.group);
+      this.weaponProps[wid] = prop;
+    }
+
+    // Invisible raycast target — same role as Enemy.mesh in entities.js, so fireWeapon()
+    // in main.js can hit-test remote players the same way it already hit-tests AI enemies.
+    this.mesh = new THREE.Mesh(s.hitboxGeo, s.clothingMat);
+    this.mesh.position.y = 0.9;
+    this.mesh.visible = false;
+    this.group.add(this.mesh);
+
+    const { healthBarBg, healthBarFg, healthBarFgMat } = buildHealthBar(s, this.group);
+    this.healthBarBg = healthBarBg;
+    this.healthBarFg = healthBarFg;
+    this.healthBarFgMat = healthBarFgMat;
+
+    const nameTag = buildNameTagSprite(name);
+    nameTag.sprite.position.set(0, 2.3, 0);
+    this.group.add(nameTag.sprite);
+    this.nameTagSprite = nameTag.sprite;
+    this.nameTagMat = nameTag.mat;
+    this.nameTagTexture = nameTag.texture;
+
+    this.group.position.set(x, 0, z);
+    scene.add(this.group);
+  }
+
+  setWeapon(weaponId) {
+    if (weaponId === this.weaponId || !this.weaponProps[weaponId]) return;
+    this.weaponProps[this.weaponId].group.visible = false;
+    this.weaponId = weaponId;
+    this.weaponProps[this.weaponId].group.visible = true;
+  }
+
+  triggerMuzzleFlash() {
+    this.gunFlashTime = WEAPON_FLASH_DURATION;
+  }
+
+  getMuzzleWorldPosition(target = new THREE.Vector3()) {
+    return this.weaponProps[this.weaponId].flash.getWorldPosition(target);
+  }
+
+  // Latest state from a "pos" relay message — stored as a lerp target, not applied
+  // immediately, so movement between the ~15Hz updates still reads smoothly. Includes
+  // the network Y (feet height) so jumps/falls are visible, not just XZ movement.
+  updateFromNetwork(x, y, z, rotY, health, isMoving, weaponId, pitch) {
+    this.targetPos.set(x, y, z);
+    this.targetRotY = rotY;
+    this.health = health;
+    this.isMoving = isMoving;
+    this.targetPitch = pitch || 0;
+    if (weaponId) this.setWeapon(weaponId);
+  }
+
+  update(dt, cameraPos, cameraRight, revealedByPulse = false) {
+    this.group.position.lerp(this.targetPos, Math.min(1, POS_LERP_SPEED * dt));
+
+    // Shortest-path angle wrap into [-PI, PI). JS's `%` is a remainder operator, not a
+    // true modulo — it can return a negative result, which left this under-wrapped right
+    // at the +-180 crossing (a small further turn there could read back as a huge jump).
+    // The extra `+ TAU) % TAU` normalizes it to [0, TAU) first regardless of sign, then
+    // shifting by -PI maps it into [-PI, PI) — verified against a simulated 360 turn.
+    const TAU = Math.PI * 2;
+    let diff = this.targetRotY - this.visual.rotation.y;
+    diff = (((diff + Math.PI) % TAU) + TAU) % TAU - Math.PI;
+    this.visual.rotation.y += diff * Math.min(1, ROT_LERP_SPEED * dt);
+    this.pitch += (this.targetPitch - this.pitch) * Math.min(1, ROT_LERP_SPEED * dt);
+
+    const swingTarget = this.isMoving ? 1 : 0;
+    this.walkPhase += dt * (this.isMoving ? 7 : 2.5);
+    this.swingAmount += (swingTarget - this.swingAmount) * Math.min(1, 6 * dt);
+    const swing = this.swingAmount;
+
+    this.leftLeg.rotation.x = Math.sin(this.walkPhase) * WALK_LEG_SWING * swing;
+    this.rightLeg.rotation.x = Math.sin(this.walkPhase + Math.PI) * WALK_LEG_SWING * swing;
+    this.leftArm.rotation.x = Math.sin(this.walkPhase + Math.PI) * WALK_ARM_SWING * swing;
+
+    // The gun arm holds a permanent ready/aiming stance (never drops to hanging) — a small
+    // sway keeps the walk cycle alive, and the whole pose tilts with the owner's actual look
+    // pitch so an onlooker can tell roughly where someone is aiming without them needing to
+    // fire.
+    const armSway = Math.sin(this.walkPhase) * IDLE_ARM_SWAY * swing;
+    const pitchTilt = clamp(this.pitch * ARM_PITCH_SCALE, -0.9, 0.9);
+    this.rightArm.rotation.x = clamp(AIM_ARM_ANGLE + pitchTilt + armSway, ARM_ANGLE_MIN, ARM_ANGLE_MAX);
+
+    this.head.rotation.x = clamp(this.pitch * HEAD_PITCH_SCALE, -HEAD_PITCH_MAX, HEAD_PITCH_MAX);
+
+    this.visual.position.y = Math.abs(Math.sin(this.walkPhase)) * 0.04 * swing;
+
+    updateHealthBarSprite(this.healthBarFg, this.healthBarFgMat, this.health / this.maxHealth, cameraRight);
+    if (cameraPos) {
+      const distToCamera = this.group.position.distanceTo(cameraPos);
+      updateNameplateVisibility([this.nameTagSprite], distToCamera);
+      // Health is only ever visible while this specific player is actively revealed by a
+      // Recon Pulse (main.js tracks that per-target, not globally) — the same distance rule
+      // still applies underneath so it doesn't show right in someone's face either. Passing
+      // -Infinity when not revealed forces `visible = false` through the exact same shared
+      // helper rather than duplicating its distance-comparison logic here.
+      updateNameplateVisibility([this.healthBarBg, this.healthBarFg], revealedByPulse ? distToCamera : -Infinity);
+    }
+
+    const activeProp = this.weaponProps[this.weaponId];
+    if (this.gunFlashTime > 0) {
+      this.gunFlashTime -= dt;
+      const t = Math.max(0, this.gunFlashTime / WEAPON_FLASH_DURATION);
+      activeProp.flashMat.opacity = t * 0.9;
+      activeProp.flash.scale.setScalar(0.6 + (1 - t) * 1.2);
+      activeProp.flashLight.intensity = t * 4;
+    } else {
+      activeProp.flashMat.opacity = 0;
+      activeProp.flashLight.intensity = 0;
+    }
+  }
+
+  // Detaches this player's limb chunks into free-flying ragdoll pieces on elimination —
+  // same mechanism/physics an AI enemy uses (see breakApartHumanoid in humanoidParts.js).
+  // Returns the tracked parts for the caller to push into its usual updateCorpseParts()
+  // list; the caller should remove this RemotePlayer from its tracking map afterward
+  // (it's gone until the player's next position tick after respawning, which lazily
+  // recreates it).
+  breakApart(scene, blast = null) {
+    const activeProp = this.weaponProps[this.weaponId];
+    activeProp.flashMat.opacity = 0;
+    activeProp.flashLight.intensity = 0;
+    const parts = breakApartHumanoid(scene, this.group, this.parts, blast);
+    this.nameTagMat.dispose();
+    this.nameTagTexture.dispose();
+    return parts;
+  }
+
+  destroy(scene) {
+    scene.remove(this.group);
+    this.nameTagMat.dispose();
+    this.nameTagTexture.dispose();
+  }
+}
