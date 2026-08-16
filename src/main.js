@@ -690,7 +690,7 @@ function animate() {
     // endGame()) during a "multiplayer" match.
     if (!ctx.inMatch) {
       for (const e of ctx.enemies) {
-        const damage = e.update(dt, elapsed, camera.position, ctx.obstacles, ctx.obstacleMeshes, camRight);
+        const damage = e.update(dt, elapsed, camera.position, ctx.obstacles, ctx.obstacleMeshes, camRight, ctx.invisibleTimer <= 0);
         if (e.justFired) sounds.play("fire_pistol", { volume: 0.35, rate: 0.9 + Math.random() * 0.15 });
         if (damage) {
           player.takeDamage(damage);

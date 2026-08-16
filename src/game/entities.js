@@ -121,7 +121,13 @@ export class Enemy {
     updateHealthBarSprite(this.healthBarFg, this.healthBarFgMat, this.health / this.maxHealth, cameraRight);
   }
 
-  update(dt, elapsed, playerPos, obstacles, obstacleMeshes, cameraRight) {
+  // `playerVisible` (default true — every other caller/context has nothing to hide) is
+  // Assassin's Invisibility: false makes the AI treat the player as if they'd walked out of
+  // aggro range entirely — no tracking, no aiming, no shots — rather than just making shots
+  // less likely to land. A human opponent can still land a lucky hit on an invisible player
+  // (see combat.js — that's a deliberate difference from AI, which has no way to "remember"
+  // a rough last-known position the way a person tracking sound/movement might).
+  update(dt, elapsed, playerPos, obstacles, obstacleMeshes, cameraRight, playerVisible = true) {
     if (!this.alive) return null;
     this.justFired = false;
 
@@ -134,7 +140,7 @@ export class Enemy {
     const dir = dist > 0.0001 ? toPlayer.divideScalar(dist) : new THREE.Vector3(0, 0, 1);
 
     let moving = false;
-    if (dist < this.aggroRange) {
+    if (playerVisible && dist < this.aggroRange) {
       // Negated on purpose: THREE's rotation.y convention maps local -Z (the model's front,
       // where the eye sits) to (-sin θ, -cos θ), which is -dir at θ = atan2(dir.x, dir.z) — i.e.
       // the un-negated form actually turns the character's back to the player. Verified
@@ -173,7 +179,7 @@ export class Enemy {
     // Raises only the gun arm into an aiming stance whenever it's in gun range, rather than
     // just leaving the gun hanging at the hip — that's what read as "weird" before. The off
     // hand stays on its normal walk-swing, not raised too.
-    const wantsToAim = dist < this.aggroRange && dist <= this.engageRange;
+    const wantsToAim = playerVisible && dist < this.aggroRange && dist <= this.engageRange;
     this.aimAmount += ((wantsToAim ? 1 : 0) - this.aimAmount) * Math.min(1, 7 * dt);
     const aim = this.aimAmount;
 
@@ -190,7 +196,7 @@ export class Enemy {
 
     let damage = null;
     if (this.fireCooldown > 0) this.fireCooldown -= dt;
-    if (dist < this.aggroRange && dist <= this.engageRange && this.fireCooldown <= 0) {
+    if (playerVisible && dist < this.aggroRange && dist <= this.engageRange && this.fireCooldown <= 0) {
       if (hasLineOfSight(this.group.position, playerPos, obstacleMeshes)) {
         this.fireCooldown = this.fireCooldownMax;
         this.justFired = true;
