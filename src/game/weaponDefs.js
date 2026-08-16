@@ -64,13 +64,33 @@ export const WEAPON_DEFS = [
     aimFov: 62,
     aimViewDistance: 0.55,
   },
+  {
+    id: "knife",
+    name: "Knife",
+    fireMode: "semi",
+    fireRate: 0.6, // swing cooldown, not a reload-relevant rate
+    damage: 90,
+    magSize: Infinity, // no ammo — WeaponSlot's ammo>0/ammo>=magSize checks already degrade
+    reloadDuration: 0, // correctly to "always ready, reload always no-ops" with no other changes
+    hitscan: true, // still a raycast hit-test, just range-clamped (see combat.js's melee branch)
+    melee: true,
+    range: 2.2, // matches this project's other close-range constants (SHIELD_PLACE_DISTANCE, MINE_TRIGGER_RADIUS)
+    spread: 0,
+    kickPos: 0.05,
+    kickRot: 0.2,
+    aimFov: 65,
+    aimViewDistance: 0.4,
+  },
 ];
 
 // One class per weapon — picking a class locks the player to that weapon for the rest of
 // that life (see Loadout.setClass), rather than the old "every weapon always available,
 // scroll to cycle" behavior. `weaponId` must match a WEAPON_DEFS id. `ability.id` is the key
 // main.js's useAbility() switches on; `cooldown` (seconds) is shared generically by the HUD
-// indicator and the per-frame countdown regardless of which ability it is.
+// indicator and the per-frame countdown regardless of which ability it is. `speedMult`/
+// `staminaMult`/`healthMult` (all default to 1 when omitted — see Player.applyClassModifiers)
+// let a class diverge from the otherwise-identical movement/stamina/health every class shared
+// until Assassin needed to be faster/higher-stamina/squishier than the rest.
 export const CLASSES = [
   {
     id: "scout",
@@ -99,6 +119,16 @@ export const CLASSES = [
     weaponId: "bazooka",
     tagline: "Explosive splash damage — clears rooms and cover alike.",
     ability: { id: "mine", name: "Proximity Mine", cooldown: 10 },
+  },
+  {
+    id: "assassin",
+    name: "Assassin",
+    weaponId: "knife",
+    tagline: "Fast, fragile, and hard to pin down — get in close and vanish.",
+    ability: { id: "invisibility", name: "Invisibility", cooldown: 20 },
+    speedMult: 1.15,
+    staminaMult: 1.3,
+    healthMult: 0.7,
   },
 ];
 

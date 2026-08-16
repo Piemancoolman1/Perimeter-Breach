@@ -35,6 +35,13 @@ const PLAYER_COLORS = [0x3a5f7a, 0x7a3a3a, 0x7a6a3a, 0x5a3a7a, 0x3a7a6a, 0x7a3a6
 const POS_LERP_SPEED = 12;
 const ROT_LERP_SPEED = 10;
 
+// Assassin's Invisibility (main.js's `invisibleTimer`, broadcast as `invisible` in the
+// position tick) — a lerp rate rather than a tracked fade timer, same trick position/rotation
+// already use. This exponential approach (`opacity += (target - opacity) * rate * dt`)
+// reaches ~95% of the way to its target after 3/rate seconds — at rate 6 that's ~0.5s,
+// which is what reads as "fades over half a second" rather than snapping.
+const INVISIBLE_FADE_RATE = 6;
+
 // Post-respawn invincibility shield — broadcast by the owning client (main.js's `invincibleTimer
 // > 0`) in every position tick, so peers can see at a glance that shooting this player won't
 // land a hit rather than only finding out via a "no damage" surprise. A low-poly sphere
@@ -93,6 +100,7 @@ export class RemotePlayer {
     this.gunFlashTime = 0;
     this.invincible = false;
     this.invincibleGlowPhase = 0;
+    this.targetInvisible = false; // set from network; body opacity lerps toward 0 (this) or 1
 
     this.targetPos = new THREE.Vector3(x, 0, z);
     this.targetRotY = 0;
@@ -103,8 +111,19 @@ export class RemotePlayer {
       roughness: 0.82,
       metalness: 0.08,
       emissive: 0x141a10,
+      transparent: true, // needed for the Invisibility fade below, even at opacity 1 the rest of the time
     });
-    const built = buildHumanoidBody(s, { clothingMat });
+    // Cloned (not the shared s.skinMat/s.bootMat every Enemy/other RemotePlayer also uses) —
+    // Invisibility fades THIS player's whole body, and mutating a shared material's opacity
+    // would invisibly (pun intended) affect every other humanoid in the scene too.
+    const skinMat = s.skinMat.clone();
+    skinMat.transparent = true;
+    const bootMat = s.bootMat.clone();
+    bootMat.transparent = true;
+    const built = buildHumanoidBody(s, { clothingMat, skinMat, bootMat });
+    this.clothingMat = clothingMat;
+    this.skinMat = skinMat;
+    this.bootMat = bootMat;
     this.group = built.group;
     this.visual = built.visual;
     this.torso = built.torso;
@@ -180,13 +199,14 @@ export class RemotePlayer {
   // Latest state from a "pos" relay message — stored as a lerp target, not applied
   // immediately, so movement between the ~15Hz updates still reads smoothly. Includes
   // the network Y (feet height) so jumps/falls are visible, not just XZ movement.
-  updateFromNetwork(x, y, z, rotY, health, isMoving, weaponId, pitch, invincible) {
+  updateFromNetwork(x, y, z, rotY, health, isMoving, weaponId, pitch, invincible, invisible) {
     this.targetPos.set(x, y, z);
     this.targetRotY = rotY;
     this.health = health;
     this.isMoving = isMoving;
     this.targetPitch = pitch || 0;
     this.invincible = !!invincible;
+    this.targetInvisible = !!invisible;
     if (weaponId) this.setWeapon(weaponId);
   }
 
@@ -233,6 +253,15 @@ export class RemotePlayer {
         INVINCIBLE_GLOW_MIN_OPACITY + pulse * (INVINCIBLE_GLOW_MAX_OPACITY - INVINCIBLE_GLOW_MIN_OPACITY);
     }
 
+    // Purely visual concealment (still hittable — see combat.js's damage handling, which
+    // never checks this) — fades the whole body toward transparent/opaque rather than an
+    // instant on/off, at a rate tuned to read as "fades over about half a second."
+    const targetOpacity = this.targetInvisible ? 0 : 1;
+    const opacityLerp = Math.min(1, INVISIBLE_FADE_RATE * dt);
+    this.clothingMat.opacity += (targetOpacity - this.clothingMat.opacity) * opacityLerp;
+    this.skinMat.opacity += (targetOpacity - this.skinMat.opacity) * opacityLerp;
+    this.bootMat.opacity += (targetOpacity - this.bootMat.opacity) * opacityLerp;
+
     updateHealthBarSprite(this.healthBarFg, this.healthBarFgMat, this.health / this.maxHealth, cameraRight);
     if (cameraPos) {
       const distToCamera = this.group.position.distanceTo(cameraPos);
@@ -272,10 +301,20 @@ export class RemotePlayer {
     const activeProp = this.weaponProps[this.weaponId];
     activeProp.flashMat.opacity = 0;
     activeProp.flashLight.intensity = 0;
+    // Always a fully-visible explosion, regardless of Invisibility's current fade state or
+    // remaining duration — a killer should always get clear visual confirmation of the kill,
+    // never watch an invisible (or mid-fade) corpse fly apart. matchLifecycle.js separately
+    // zeroes the *victim's own* invisibleTimer on death; this is what guarantees the same for
+    // every observer's already-rendered copy, regardless of network timing between the two.
+    this.clothingMat.opacity = 1;
+    this.skinMat.opacity = 1;
+    this.bootMat.opacity = 1;
     const parts = breakApartHumanoid(scene, this.group, this.parts, blast);
     this.nameTagMat.dispose();
     this.nameTagTexture.dispose();
     this.invincibleGlowMat.dispose(); // per-instance material (opacity mutated independently per player) — the geometry itself is shared, so only this needs disposing
+    this.skinMat.dispose();
+    this.bootMat.dispose();
     return parts;
   }
 
@@ -284,5 +323,7 @@ export class RemotePlayer {
     this.nameTagMat.dispose();
     this.nameTagTexture.dispose();
     this.invincibleGlowMat.dispose();
+    this.skinMat.dispose();
+    this.bootMat.dispose();
   }
 }

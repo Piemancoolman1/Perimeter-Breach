@@ -123,6 +123,9 @@ export function sharedHumanoidParts() {
     bazookaHandguardGeo: new THREE.BoxGeometry(0.05, 0.2, 0.05),
     bazookaSightPostGeo: new THREE.BoxGeometry(0.014, 0.014, 0.05),
     bazookaSightRingGeo: new THREE.TorusGeometry(0.028, 0.005, 8, 16),
+    knifeHandleGeo: new THREE.BoxGeometry(0.035, 0.14, 0.035),
+    knifeGuardGeo: new THREE.BoxGeometry(0.09, 0.02, 0.02),
+    knifeBladeGeo: new THREE.BoxGeometry(0.016, 0.26, 0.006),
     skinMat,
     clothingMat,
     bootMat,
@@ -133,7 +136,7 @@ export function sharedHumanoidParts() {
   return SHARED;
 }
 
-export const WEAPON_IDS = ["pistol", "ak47", "sniper", "bazooka"];
+export const WEAPON_IDS = ["pistol", "ak47", "sniper", "bazooka", "knife"];
 
 // A held weapon prop clipped to a gun hand, built part-for-part to match its first-person
 // counterpart in weapon.js (same body/barrel/grip/mag/sights, same relative proportions) —
@@ -246,6 +249,17 @@ export function buildWeaponProp(s, weaponId = "pistol") {
     sightRing.rotation.x = Math.PI / 2;
     group.add(sightRing);
     muzzle = { x: 0, y: -0.48, z: 0 };
+  } else if (weaponId === "knife") {
+    const handle = new THREE.Mesh(s.knifeHandleGeo, metalMat);
+    handle.position.set(0, 0.09, 0);
+    group.add(handle);
+    const guard = new THREE.Mesh(s.knifeGuardGeo, metalMat);
+    guard.position.set(0, 0.02, 0);
+    group.add(guard);
+    const blade = new THREE.Mesh(s.knifeBladeGeo, metalMat);
+    blade.position.set(0, -0.15, 0);
+    group.add(blade);
+    muzzle = { x: 0, y: -0.28, z: 0 };
   } else {
     group.add(new THREE.Mesh(s.gunBodyGeo, metalMat));
     const barrel = new THREE.Mesh(s.gunBarrelGeo, metalMat);
@@ -294,9 +308,14 @@ export function buildWeaponProp(s, weaponId = "pistol") {
 // Builds just the body — torso/head/face/limbs/boots/hands — with no gun, hitbox,
 // health bar, or ragdoll bookkeeping; callers (Enemy, RemotePlayer) attach whichever of
 // those they need on top. `materialOverrides` lets a caller (e.g. a per-player color
-// tint) swap in its own clothing material instance instead of the shared default.
+// tint, or Assassin's per-instance Invisibility fade) swap in its own material instances
+// instead of the shared defaults — skin/boot needed alongside clothing so a full-body
+// fade doesn't leave a floating head/hands/boots behind (eyes/mouth are left on the
+// shared material regardless; too small a detail to be worth their own per-instance copy).
 export function buildHumanoidBody(s, materialOverrides = {}) {
   const clothingMat = materialOverrides.clothingMat || s.clothingMat;
+  const skinMat = materialOverrides.skinMat || s.skinMat;
+  const bootMat = materialOverrides.bootMat || s.bootMat;
 
   const group = new THREE.Group();
   const visual = new THREE.Group();
@@ -309,7 +328,7 @@ export function buildHumanoidBody(s, materialOverrides = {}) {
 
   // Eyes + mouth are nested under the head mesh (not `visual` directly) so they stay
   // rigidly attached to it if the head is ever detached on its own (e.g. a death ragdoll).
-  const head = new THREE.Mesh(s.headGeo, s.skinMat);
+  const head = new THREE.Mesh(s.headGeo, skinMat);
   head.position.y = 1.65;
   head.castShadow = true;
   visual.add(head);
@@ -339,7 +358,7 @@ export function buildHumanoidBody(s, materialOverrides = {}) {
     mesh.position.y = -0.4;
     mesh.castShadow = true;
     pivot.add(mesh);
-    const boot = new THREE.Mesh(s.bootGeo, s.bootMat);
+    const boot = new THREE.Mesh(s.bootGeo, bootMat);
     boot.position.y = -0.8;
     boot.position.z = -0.03;
     boot.castShadow = true;
@@ -358,7 +377,7 @@ export function buildHumanoidBody(s, materialOverrides = {}) {
     mesh.position.y = -0.275;
     mesh.castShadow = true;
     pivot.add(mesh);
-    const hand = new THREE.Mesh(s.handGeo, s.skinMat);
+    const hand = new THREE.Mesh(s.handGeo, skinMat);
     hand.position.y = -0.58;
     hand.castShadow = true;
     pivot.add(hand);

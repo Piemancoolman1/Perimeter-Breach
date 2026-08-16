@@ -14,6 +14,7 @@ const MINE_TRIGGER_RADIUS = 2.2;
 export const MINE_BLAST_RADIUS = 4;
 const MINE_DAMAGE = 300;
 const MINE_MAX_LIFETIME = 200; // safety net if it's never triggered (e.g. owner disconnects)
+const INVISIBILITY_DURATION = 6;
 
 // The four class abilities (Q): dash, shield wall, recon pulse, proximity mine. Every entry in
 // activeShields/activeMines/activeReconMarkers is tracked *regardless of whose it is* —
@@ -43,6 +44,9 @@ export function createAbilities(ctx) {
         break;
       case "mine":
         placeMine();
+        break;
+      case "invisibility":
+        doInvisibility();
         break;
       default:
         return; // unknown ability id — don't burn the cooldown on nothing
@@ -172,6 +176,15 @@ export function createAbilities(ctx) {
     }
   }
 
+  // Assassin: no placed object and no relay message of its own — a peer finds out purely by
+  // watching `invisible` ride along in this player's own position ticks (main.js), the exact
+  // same mechanism the post-respawn invincibility shield already uses for its glow. Fades
+  // in/out client-side on every observer's own RemotePlayer instance (remotePlayer.js) rather
+  // than needing the fade's progress itself to be networked.
+  function doInvisibility() {
+    ctx.invisibleTimer = INVISIBILITY_DURATION;
+  }
+
   // Clears every active shield/mine/recon marker regardless of ownership — used wherever match
   // state is already torn down wholesale (match start/end/disconnect, single-player restart),
   // same treatment corpseParts/remotePlayers already get in those same spots.
@@ -181,6 +194,7 @@ export function createAbilities(ctx) {
     for (const marker of activeReconMarkers) ctx.scene.remove(marker.sprite);
     activeReconMarkers.length = 0;
     ctx.abilityCooldownRemaining = 0;
+    ctx.invisibleTimer = 0;
   }
 
   return {

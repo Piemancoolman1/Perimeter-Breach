@@ -36,6 +36,8 @@ export class Player {
     this.stamina = STAMINA_MAX;
     this.staminaLocked = false; // true once stamina hits 0; stays true until it regens back above STAMINA_LOCK_RECOVER_THRESHOLD
 
+    this.speedMult = 1;
+    this.staminaMult = 1;
     this.maxHealth = 100;
     this.health = this.maxHealth;
 
@@ -44,6 +46,18 @@ export class Player {
 
   get position() {
     return this.camera.position;
+  }
+
+  // Applies a class's stat divergence from the shared baseline every class used to share
+  // identically — called once per (re)spawn (see matchLifecycle.js's resetPlayerState,
+  // which looks up the currently-selected class) rather than at construction time, since
+  // the class can change mid-session (death and re-pick, or a single-player class swap).
+  // Health/stamina are left for the caller to actually reset to the new cap — this only
+  // updates what the cap *is*.
+  applyClassModifiers({ speedMult = 1, staminaMult = 1, healthMult = 1 } = {}) {
+    this.speedMult = speedMult;
+    this.staminaMult = staminaMult;
+    this.maxHealth = 100 * healthMult;
   }
 
   takeDamage(amount) {
@@ -114,14 +128,14 @@ export class Player {
       this.stamina = Math.max(0, this.stamina - STAMINA_DRAIN_RATE * dt);
       if (this.stamina <= 0) this.staminaLocked = true;
     } else {
-      this.stamina = Math.min(STAMINA_MAX, this.stamina + STAMINA_REGEN_RATE * dt);
+      this.stamina = Math.min(STAMINA_MAX * this.staminaMult, this.stamina + STAMINA_REGEN_RATE * dt);
       if (this.staminaLocked && this.stamina >= STAMINA_LOCK_RECOVER_THRESHOLD) this.staminaLocked = false;
     }
     const canSprint = wantsSprint && !this.staminaLocked; // recomputed after any lock/unlock above
 
     // Crouching overrides sprint outright (can't sprint-crouch) rather than stacking/competing
     // multipliers — simplest rule, and matches how most FPSes treat the two as mutually exclusive.
-    const speed = this.crouching ? WALK_SPEED * CROUCH_SPEED_MULT : WALK_SPEED * (canSprint ? SPRINT_MULT : 1);
+    const speed = (this.crouching ? WALK_SPEED * CROUCH_SPEED_MULT : WALK_SPEED * (canSprint ? SPRINT_MULT : 1)) * this.speedMult;
     const targetVX = moveVec.x * speed;
     const targetVZ = moveVec.z * speed;
 

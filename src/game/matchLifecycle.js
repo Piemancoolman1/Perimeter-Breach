@@ -4,7 +4,7 @@ import { EYE_HEIGHT, STAMINA_MAX } from "./player.js";
 import { Enemy, randomSpawnPoint } from "./entities.js";
 import { sharedHumanoidParts, buildHumanoidBody, breakApartHumanoid } from "./humanoidParts.js";
 import { RemotePlayer } from "./remotePlayer.js";
-import { GRENADE_DEF, WEAPON_DEFS } from "./weaponDefs.js";
+import { GRENADE_DEF, WEAPON_DEFS, CLASSES } from "./weaponDefs.js";
 import { Rocket } from "./projectiles.js";
 import { DEFAULT_MAP_ID } from "./world.js";
 import { formatGrenadeCount } from "./hud.js";
@@ -30,6 +30,13 @@ export function createMatchLifecycle(ctx) {
   // Shared by single-player reset and multiplayer match start/respawn — everything about
   // the local player's own state that has nothing to do with AI enemies or the kill counter.
   function resetPlayerState(x, z, y = 1.7) {
+    // Applied before health/stamina below are reset to their caps, since which class is
+    // equipped determines what those caps actually are (see Player.applyClassModifiers) —
+    // every class but Assassin passes no overrides here and gets the same 1/1/1 baseline
+    // every class shared until Assassin needed to diverge from it.
+    const cls = CLASSES.find((c) => c.id === ctx.selectedClassId);
+    ctx.player.applyClassModifiers(cls);
+
     ctx.player.health = ctx.player.maxHealth;
     ctx.player.velocity.set(0, 0, 0);
     ctx.player.onGround = true;
@@ -41,7 +48,7 @@ export function createMatchLifecycle(ctx) {
     ctx.input.crouch = false; // otherwise a toggle-crouch left on could spawn/respawn the player stuck crouched
     ctx.player.crouching = false;
     ctx.player.eyeHeight = EYE_HEIGHT; // reset instantly (no lerp) so respawn doesn't visibly crouch-transition from wherever it last was
-    ctx.player.stamina = STAMINA_MAX;
+    ctx.player.stamina = STAMINA_MAX * ctx.player.staminaMult;
     ctx.player.staminaLocked = false;
     ctx.leftMouseHeld = false;
     ctx.controls.pointerSpeed = ctx.settings.lookSensitivity;
@@ -53,6 +60,7 @@ export function createMatchLifecycle(ctx) {
     ctx.grenadeCount = ctx.INFINITE_GRENADES ? Infinity : GRENADE_DEF.count;
     ctx.grenadeCooldown = 0;
     ctx.abilityCooldownRemaining = 0; // fresh life, ability immediately available again — matches the full-ammo reset above
+    ctx.invisibleTimer = 0; // fresh life starts visible regardless of how the last one ended
     el.grenadeCount.textContent = formatGrenadeCount(ctx.grenadeCount);
     for (const g of ctx.grenades) g.destroy();
     ctx.grenades.length = 0;
@@ -219,6 +227,7 @@ export function createMatchLifecycle(ctx) {
 
   function startRespawnSequence(killerId, killerName, blast = null) {
     ctx.respawnTimer = RESPAWN_DELAY;
+    ctx.invisibleTimer = 0; // dying cancels Invisibility immediately, even mid-duration
     el.respawnTitle.textContent = killerId ? `Eliminated by ${killerName}` : "Eliminated";
     el.respawnOverlay.classList.remove("hidden");
     beginDeathRagdoll(blast);
@@ -279,7 +288,8 @@ export function createMatchLifecycle(ctx) {
           payload.isMoving,
           payload.weaponId,
           payload.pitch,
-          payload.invincible
+          payload.invincible,
+          payload.invisible
         );
         break;
       }
@@ -312,7 +322,8 @@ export function createMatchLifecycle(ctx) {
         const muzzleWorld = rp.getMuzzleWorldPosition(new THREE.Vector3());
         const hitVec = new THREE.Vector3(payload.hitPoint.x, payload.hitPoint.y, payload.hitPoint.z);
         if (def.hitscan) {
-          ctx.vfx.bolt(muzzleWorld, hitVec, payload.hitPlayer ? 0x4de3ff : 0x8a8172);
+          // Same "no tracer for a knife" treatment as the shooter's own client (combat.js).
+          if (!def.melee) ctx.vfx.bolt(muzzleWorld, hitVec, payload.hitPlayer ? 0x4de3ff : 0x8a8172);
           ctx.vfx.sparkBurst(hitVec, payload.hitPlayer ? 0x9be9ff : 0xbfae8a);
         } else {
           const rocket = new Rocket(ctx.scene, muzzleWorld, hitVec, def.projectileSpeed);

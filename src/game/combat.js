@@ -116,6 +116,10 @@ export function createCombat(ctx) {
     ctx.sounds.play(`fire_${def.id}`, { volume: 0.8, rate: 0.98 + Math.random() * 0.04 });
 
     ctx.raycaster.setFromCamera(ctx.screenCenter, ctx.camera);
+    // A shared Raycaster instance is reused for every weapon's shot — always set `.far`
+    // explicitly each time rather than only for melee, or a knife's short range would
+    // otherwise leak into whatever weapon fires next after a class change.
+    ctx.raycaster.far = def.range ?? Infinity;
     if (def.spread > 0) {
       ctx.raycaster.ray.direction.x += (Math.random() - 0.5) * def.spread;
       ctx.raycaster.ray.direction.y += (Math.random() - 0.5) * def.spread;
@@ -137,7 +141,7 @@ export function createCombat(ctx) {
       // where the aim ray actually crosses ground level (y=0) when it's heading downward.
       const dir = ctx.raycaster.ray.direction;
       const groundDist = dir.y < -1e-4 ? -ctx.camera.position.y / dir.y : Infinity;
-      const dist = Math.min(60, groundDist);
+      const dist = Math.min(def.range ?? 60, groundDist);
       hitPoint = ctx.camera.position.clone().addScaledVector(dir, dist);
     }
 
@@ -147,7 +151,8 @@ export function createCombat(ctx) {
         const hit = hits[0];
         const enemy = ctx.enemies.find((e) => e.mesh === hit.object);
         const remote = enemy ? null : [...ctx.remotePlayers.values()].find((rp) => rp.mesh === hit.object);
-        ctx.vfx.bolt(muzzleOrigin, hit.point, enemy || remote ? 0x4de3ff : 0x8a8172);
+        // No bullet tracer for a knife swing — a spark at the hit point is enough feedback.
+        if (!def.melee) ctx.vfx.bolt(muzzleOrigin, hit.point, enemy || remote ? 0x4de3ff : 0x8a8172);
         ctx.vfx.sparkBurst(hit.point, enemy || remote ? 0x9be9ff : 0xbfae8a);
         if (enemy) {
           ctx.sounds.play("hitmarker", { volume: 0.6 });
@@ -161,7 +166,7 @@ export function createCombat(ctx) {
             ctx.lobby.relayToPlayer(remote.id, { t: "hit", damage: def.damage, fromId: ctx.myPlayerId, fromName: loadPlayerName() });
           }
         }
-      } else {
+      } else if (!def.melee) {
         ctx.vfx.bolt(muzzleOrigin, hitPoint, 0x2a6b7a);
       }
     } else {

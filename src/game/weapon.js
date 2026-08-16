@@ -281,11 +281,48 @@ function buildBazookaMesh() {
   };
 }
 
+// No muzzle to speak of on a blade — buildMuzzleFlashParts is still used (getMuzzleWorldPosition
+// is called unconditionally by fireWeapon() regardless of weapon type) but placed at the blade
+// tip, where the brief flash on a swing reads as a glint rather than a gunshot.
+function buildKnifeMesh() {
+  const group = new THREE.Group();
+
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.14), metalMat);
+  handle.position.set(0, 0, 0.09);
+  group.add(handle);
+
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.02, 0.02), metalMat);
+  guard.position.set(0, 0, 0.02);
+  group.add(guard);
+
+  // A single flattened box for the whole blade (no separate tapered tip) — keeps this
+  // in the same box-primitive language as the rest of the low-poly art, and avoids the
+  // FP/TP axis-conversion ambiguity a rotated cone would add for one small detail.
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.006, 0.26), metalMat);
+  blade.position.set(0, 0, -0.15);
+  group.add(blade);
+
+  const fx = buildMuzzleFlashParts(new THREE.Vector3(0, 0, -0.28));
+  group.add(fx.muzzleTip, fx.flash, fx.flashLight);
+
+  return {
+    group,
+    muzzleTip: fx.muzzleTip,
+    flash: fx.flash,
+    flashMat: fx.flashMat,
+    flashLight: fx.flashLight,
+    sightLocal: new THREE.Vector3(0, 0, -0.24),
+    restPos: new THREE.Vector3(0.2, -0.22, -0.3),
+    restRot: new THREE.Euler(0.1, -0.3, 0.15),
+  };
+}
+
 const BUILDERS = {
   pistol: buildPistolMesh,
   ak47: buildAk47Mesh,
   sniper: buildSniperMesh,
   bazooka: buildBazookaMesh,
+  knife: buildKnifeMesh,
 };
 
 export class Weapon {

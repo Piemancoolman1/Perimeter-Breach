@@ -20,11 +20,13 @@ export function createHud(ctx) {
   function setHud() {
     const healthFrac = ctx.player.health / ctx.player.maxHealth;
     el.healthFill.style.width = `${healthFrac * 100}%`;
-    el.staminaFill.style.width = `${(ctx.player.stamina / STAMINA_MAX) * 100}%`;
+    // Divided by the player's actual (class-modified) stamina cap, not the bare constant —
+    // Assassin's staminaMult > 1 would otherwise push this width past 100%.
+    el.staminaFill.style.width = `${(ctx.player.stamina / (STAMINA_MAX * ctx.player.staminaMult)) * 100}%`;
     el.staminaFill.classList.toggle("locked", ctx.player.staminaLocked); // dimmer while sprint is locked out, not just regenerating
     const slot = ctx.loadout.current.slot;
     el.weaponLabel.textContent = ctx.loadout.current.def.name;
-    el.ammoText.textContent = `${slot.ammo} / ${slot.def.magSize}`;
+    el.ammoText.textContent = slot.def.melee ? "MELEE" : `${slot.ammo} / ${slot.def.magSize}`;
     el.reloadIndicator.classList.toggle("hidden", !slot.isReloading);
     el.grenadeCount.textContent = formatGrenadeCount(ctx.grenadeCount);
 

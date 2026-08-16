@@ -222,6 +222,7 @@ const ctx = {
   kills: 0,
 
   invincibleTimer: 0, // >0 while immune to damage right after a respawn
+  invisibleTimer: 0, // >0 while Assassin's Invisibility is active — purely visual, never blocks damage
   respawnTimer: 0, // >0 while dead and waiting to respawn
   deathHeadPart: null,
   deathCamOffset: new THREE.Vector3(),
@@ -799,6 +800,10 @@ function animate() {
           if (ctx.invincibleTimer <= 0) ctx.matchLifecycle.clearInvincible();
           else el.invincibleTimerEl.textContent = `${Math.ceil(ctx.invincibleTimer)}s`;
         }
+        // No local HUD/vignette tied to this (unlike invincibleTimer) — invisibility is
+        // purely something peers see (via the `invisible` position-tick field below fading
+        // to false once this hits 0), so a plain decrement is all that's needed here.
+        if (ctx.invisibleTimer > 0) ctx.invisibleTimer -= dt;
         ctx.posBroadcastAccum += dt;
         if (ctx.posBroadcastAccum >= POS_TICK_INTERVAL && ctx.lobby) {
           ctx.posBroadcastAccum = 0;
@@ -817,6 +822,7 @@ function animate() {
             isMoving,
             weaponId: loadout.current.def.id,
             invincible: ctx.invincibleTimer > 0,
+            invisible: ctx.invisibleTimer > 0,
           });
         }
       }
