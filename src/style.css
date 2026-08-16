@@ -785,6 +785,17 @@ button:active {
   line-height: 1.4;
 }
 
+.app-version {
+  position: fixed;
+  left: 10px;
+  bottom: 8px;
+  color: rgba(232, 246, 255, 0.4);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  z-index: 5;
+}
+
 .update-banner {
   display: flex;
   align-items: center;

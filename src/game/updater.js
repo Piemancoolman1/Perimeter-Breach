@@ -1,5 +1,20 @@
 import { el } from "./dom.js";
 
+// Shows the actual running app version in a corner of every screen — the ground truth
+// for "which build is this," since NSIS can silently fail to replace a running .exe
+// (Windows won't let an in-use file be overwritten) and there was otherwise no way to
+// tell which version was actually launched versus which installer was last run.
+export async function showAppVersion() {
+  if (!("__TAURI_INTERNALS__" in window)) return;
+  try {
+    const { getVersion } = await import("@tauri-apps/api/app");
+    el.appVersion.textContent = `v${await getVersion()}`;
+    el.appVersion.classList.remove("hidden");
+  } catch (err) {
+    console.warn("Could not read app version", err);
+  }
+}
+
 // Checks for a newer packaged-app release once on startup. `__TAURI_INTERNALS__` is the
 // low-level bridge every Tauri webview injects (regardless of whether the convenience
 // `window.__TAURI__` global is enabled) — its absence means this is the plain browser

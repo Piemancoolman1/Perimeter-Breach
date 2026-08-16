@@ -7,6 +7,7 @@ export const el = {
   updateBanner: document.getElementById("update-banner"),
   updateBannerText: document.getElementById("update-banner-text"),
   updateInstallBtn: document.getElementById("update-install-btn"),
+  appVersion: document.getElementById("app-version"),
 
   multiplayerScreen: document.getElementById("multiplayer-screen"),
   playerNameInput: document.getElementById("player-name-input"),
