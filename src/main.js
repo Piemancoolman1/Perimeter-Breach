@@ -19,6 +19,7 @@ import { createLobbyUi } from "./game/lobbyUi.js";
 import { createAbilities } from "./game/abilities.js";
 import { createCombat } from "./game/combat.js";
 import { createMatchLifecycle } from "./game/matchLifecycle.js";
+import { checkForUpdate } from "./game/updater.js";
 import "./style.css";
 
 const TOTAL_KILLS_TO_WIN = 20;
@@ -850,5 +851,7 @@ function animate() {
     ctx.debugPanel.updateDebugPanel(rawDt);
   }
 }
+
+checkForUpdate();
 
 animate();

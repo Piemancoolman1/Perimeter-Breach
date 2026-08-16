@@ -9,13 +9,17 @@
     "preview": "vite preview",
     "server": "node server/index.js",
     "tunnel:server": ".\\tools\\cloudflared.exe tunnel --url http://localhost:8787",
-    "tunnel:client": ".\\tools\\cloudflared.exe tunnel --url http://localhost:5173"
+    "tunnel:client": ".\\tools\\cloudflared.exe tunnel --url http://localhost:5173",
+    "tauri": "tauri"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
     "playwright": "^1.62.1",
     "vite": "^8.2.0"
   },
   "dependencies": {
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "three": "^0.185.1",
     "ws": "^8.21.3"
   }

@@ -15,6 +15,16 @@ dist-ssr
 # Downloaded binary, not source — see tools/README.md for how to fetch it
 tools/cloudflared.exe
 
+# Generated per-release by tools/make-update-manifest.js, uploaded straight to a GitHub
+# Release rather than committed
+/latest.json
+
+# Tauri updater signing key — must never be committed (see plan/updater setup notes);
+# the real copy lives outside this repo at ~/.tauri, this is only a safety net in case
+# one is ever generated inside the project by mistake
+*.key
+*.key.pub
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

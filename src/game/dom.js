@@ -4,6 +4,9 @@ export const el = {
   landing: document.getElementById("landing"),
   singlePlayerBtn: document.getElementById("singleplayer-btn"),
   multiplayerBtn: document.getElementById("multiplayer-btn"),
+  updateBanner: document.getElementById("update-banner"),
+  updateBannerText: document.getElementById("update-banner-text"),
+  updateInstallBtn: document.getElementById("update-install-btn"),
 
   multiplayerScreen: document.getElementById("multiplayer-screen"),
   playerNameInput: document.getElementById("player-name-input"),

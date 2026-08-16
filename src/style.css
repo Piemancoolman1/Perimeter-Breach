@@ -785,6 +785,28 @@ button:active {
   line-height: 1.4;
 }
 
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 0 0 18px;
+  font-size: 13px;
+  text-align: left;
+}
+.update-banner span {
+  color: #e8f6ff;
+}
+.update-banner button {
+  padding: 8px 16px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .mp-error {
   color: var(--danger);
   font-size: 13px;
