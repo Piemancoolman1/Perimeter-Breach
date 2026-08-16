@@ -56,6 +56,25 @@ function buildHitbox(x, z, hx, hz, top, rotY = 0, shape = "box", wallTop) {
     hitbox.renderOrder = 999;
     return hitbox;
   }
+  if (shape === "ramp") {
+    // A one-directional staircase ramp — low at local z=-hz (height wallTop), high at local
+    // z=+hz (height top) — a right triangle, unlike roofPrism's isosceles ridge shape (which
+    // peaks at the *center* and slopes down both ways, correct for a gable roof but wrong for
+    // a staircase that only ever climbs in one direction).
+    const rampShape = new THREE.Shape();
+    rampShape.moveTo(-hz, wallTop);
+    rampShape.lineTo(hz, top);
+    rampShape.lineTo(hz, wallTop);
+    rampShape.closePath();
+    const geo = new THREE.ExtrudeGeometry(rampShape, { depth: hx * 2, bevelEnabled: false });
+    geo.translate(0, 0, -hx);
+    const hitbox = new THREE.Mesh(geo, HITBOX_MAT);
+    hitbox.position.set(x, 0, z);
+    hitbox.rotation.y = Math.PI / 2 + rotY;
+    hitbox.visible = false;
+    hitbox.renderOrder = 999;
+    return hitbox;
+  }
   const geo = shape === "ellipse" ? ELLIPSE_HITBOX_GEO : new THREE.BoxGeometry(hx * 2, top, hz * 2);
   const hitbox = new THREE.Mesh(geo, HITBOX_MAT);
   if (shape === "ellipse") hitbox.scale.set(hx, top, hz);
@@ -97,6 +116,57 @@ function cluster(originX, originZ, rotY, items) {
     z: originZ + x * sinR + z * cosR,
     rotY: (localRotY || 0) + rotY,
   }));
+}
+
+// Own small local constants rather than reusing buildMultiStoryBuilding's WALL_HALF_THICKNESS/
+// DOOR_GAP_HALF_WIDTH (same values, deliberately duplicated) — those are declared much later in
+// this file, and `room()` gets called from inside a map's `obstacleLayout` array literal, which
+// (like `cluster()` calls already do) executes immediately as part of evaluating the top-level
+// `MAPS` object — a `const` declared later in the file wouldn't exist yet at that point (a real
+// temporal-dead-zone hazard, unlike a `function` declaration, which is fully hoisted regardless
+// of where it's written).
+const ROOM_WALL_HALF_THICKNESS = 0.12;
+const ROOM_DOOR_GAP_HALF_WIDTH = 0.85; // total 1.7 units — comfortably more than 2x the player's 0.9 diameter
+
+// Authors one rectangular room's four walls as plain `{type:"wall"}` obstacleLayout entries —
+// a pure data generator, same spirit as `cluster()` above, not a mesh builder. `doorSides` is a
+// subset of ["north","south","east","west"] (local axes, before rotY); each listed side gets a
+// real door-width gap (split into two wall segments), everything else is one solid piece. A
+// room never builds a "corridor" of its own — the corridor is just the open floor space a row
+// of rooms' doorways face onto, exactly like the Urban map's streets are just open ground
+// between building blocks.
+function room(x, z, hx, hz, rotY, doorSides = []) {
+  const has = (side) => doorSides.includes(side);
+  const segs = [];
+  const addWall = (localX, localZ, wHx, wHz) => {
+    const off = localOffsetToWorld(localX, localZ, rotY);
+    segs.push({ x: x + off.x, z: z + off.z, hx: wHx, hz: wHz, rotY, type: "wall" });
+  };
+  // `axisIsX`: true for north/south (the wall runs along local X, so a door gap splits it along
+  // X); false for east/west (runs along local Z, split along Z).
+  const addSide = (side, wallLocalPos, span, axisIsX) => {
+    if (has(side)) {
+      const half = (span - ROOM_DOOR_GAP_HALF_WIDTH) / 2;
+      if (half > 0.1) {
+        if (axisIsX) {
+          addWall(-(ROOM_DOOR_GAP_HALF_WIDTH + half), wallLocalPos, half, ROOM_WALL_HALF_THICKNESS);
+          addWall(ROOM_DOOR_GAP_HALF_WIDTH + half, wallLocalPos, half, ROOM_WALL_HALF_THICKNESS);
+        } else {
+          addWall(wallLocalPos, -(ROOM_DOOR_GAP_HALF_WIDTH + half), ROOM_WALL_HALF_THICKNESS, half);
+          addWall(wallLocalPos, ROOM_DOOR_GAP_HALF_WIDTH + half, ROOM_WALL_HALF_THICKNESS, half);
+        }
+      }
+    } else if (axisIsX) {
+      addWall(0, wallLocalPos, span, ROOM_WALL_HALF_THICKNESS);
+    } else {
+      addWall(wallLocalPos, 0, ROOM_WALL_HALF_THICKNESS, span);
+    }
+  };
+  addSide("north", hz - ROOM_WALL_HALF_THICKNESS, hx, true);
+  addSide("south", -(hz - ROOM_WALL_HALF_THICKNESS), hx, true);
+  addSide("east", hx - ROOM_WALL_HALF_THICKNESS, hz, false);
+  addSide("west", -(hx - ROOM_WALL_HALF_THICKNESS), hz, false);
+  return segs;
 }
 
 export const MAPS = {
@@ -330,6 +400,128 @@ export const MAPS = {
       { x: 85, z: 5, s: 0.9 }, { x: -85, z: -5, s: 0.9 }, { x: 5, z: 85, s: 0.85 }, { x: -5, z: -85, s: 0.85 },
     ],
   },
+
+  urban: {
+    id: "urban",
+    name: "Perimeter Heights",
+    description: "A small city block — paved streets, parked cars, and buildings you can actually walk (and climb) into.",
+    // No arenaBound override — same small footprint as Grassland/Frostbite, not the bigger
+    // Dunes/Nightfall arenas.
+    groundColor: 0x6b6a5c,
+    groundTextured: false,
+    sky: { top: 0x5a9bd6, bottom: 0xe6f0f7, body: "sun", cloudColor: 0xffffff, cloudCount: 10 },
+    fog: { color: 0xd8e2ea, density: 0.006 },
+    hemi: { sky: 0xb8d4e8, ground: 0x4a4a42, intensity: 1.15 },
+    sun: { color: 0xfff0d8, intensity: 2.0 },
+    wallColor: 0x8a8478,
+    rockTint: 0x8a8478,
+    rockEmissive: 0x1a1814,
+    treeTrunkColor: 0x4a3524,
+    treeFoliageColor: 0x3a6b3a,
+    buildingWallColor: 0xc9beac,
+    buildingRoofColor: 0x7a4a3a,
+    buildingTrimColor: 0x2a2620,
+    streetColor: 0x3a3a3e,
+    sidewalkColor: 0x9a9690,
+    // A "+" crossing through the map center dividing it into 4 city blocks.
+    streetLayout: [
+      { x: 0, z: 0, width: 9, length: 72, rotY: 0 },
+      { x: 0, z: 0, width: 9, length: 72, rotY: Math.PI / 2 },
+    ],
+    obstacleLayout: [
+      // NE block — a 2-story building + parked car.
+      ...cluster(16, 16, 0, [
+        { x: 0, z: 0, type: "building", hx: 3.4, hz: 3.2, stories: 2 },
+        { x: 5.8, z: -1, type: "car", rotY: 0.2 },
+      ]),
+      // NW block — a small 1-story shop + car (still the existing single-story path — no
+      // `stories` field, byte-identical to how every other map's buildings already work).
+      ...cluster(-16, 16, 1.6, [
+        { x: 0, z: 0, type: "building", hx: 2.4, hz: 2.2, h: 2.6 },
+        { x: 4.6, z: 1.6, type: "car", rotY: -0.3 },
+      ]),
+      // SE block — the 3-story landmark.
+      ...cluster(16, -16, -1.0, [
+        { x: 0, z: 0, type: "building", hx: 3.6, hz: 3.4, stories: 3 },
+        { x: -5.8, z: 1, type: "car", rotY: 1.4 },
+      ]),
+      // SW block — a 2-story building + two cars.
+      ...cluster(-16, -16, 2.4, [
+        { x: 0, z: 0, type: "building", hx: 3.2, hz: 3, stories: 2 },
+        { x: 5.2, z: 3.2, type: "car", rotY: 0.5 },
+        { x: 5.2, z: -3.2, type: "car", rotY: -0.5 },
+      ]),
+      // A couple of standalone shops out toward the corners, and a few roadside cars not tied
+      // to any block, for a less uniform street-level feel.
+      { x: 28, z: 4, type: "building", hx: 2, hz: 1.8, h: 2.6, rotY: 0.4 },
+      { x: -6, z: 29, type: "building", hx: 2, hz: 2, h: 2.6, rotY: -0.6 },
+      { x: 4.8, z: 26, type: "car", rotY: 0 },
+      { x: -4.8, z: -27, type: "car", rotY: Math.PI },
+    ],
+    // Sparse street trees — a city block, not Grassland's forest.
+    treeLayout: [
+      { x: 30, z: -20, s: 1.0 }, { x: -30, z: 22, s: 0.95 }, { x: 24, z: 30, s: 1.05 },
+      { x: -28, z: -30, s: 1.0 }, { x: 2, z: -33, s: 0.9 }, { x: -2, z: 33, s: 0.9 },
+    ],
+  },
+
+  hospital: {
+    id: "hospital",
+    name: "St. Perimeter Medical",
+    description: "A fully indoor hospital floor — corridors, patient rooms, and an OR. No outdoor space at all.",
+    // No arenaBound override — same small footprint as Grassland/Frostbite/Urban.
+    ceiling: true, // caps the whole arena at wall height — see buildWorld's ceiling block
+    groundColor: 0xd8dcd6,
+    groundTextured: false,
+    // Sky/fog/hemi/sun still need real values (every map config expects them, and the outer
+    // walls + ceiling are what actually keep them from ever being seen) — kept dim/cool since
+    // the ceiling blocks the sun entirely; the interior lights below carry the actual lighting.
+    sky: { top: 0x9fb0b8, bottom: 0xc8d2d4, body: "sun", cloudColor: 0xffffff, cloudCount: 4 },
+    fog: { color: 0xc8d2d4, density: 0.01 },
+    hemi: { sky: 0x8fa0a8, ground: 0x707868, intensity: 0.55 },
+    sun: { color: 0xdce8ec, intensity: 0.4 },
+    wallColor: 0xe8ece6, // pale sterile wall/ceiling tone
+    rockTint: 0xe8ece6,
+    rockEmissive: 0x1a1c18,
+    treeTrunkColor: 0x4a3524,
+    treeFoliageColor: 0x3a6b3a, // unused — no trees indoors
+    // A main corridor along X (z in [-3,3]) crosses a corridor along Z (x in [-3,3]); every
+    // room's doorway opens directly onto whichever corridor arm it lines, so the corridors
+    // themselves need no walls of their own (see room()'s comment). East/west-wing rooms are
+    // kept to |z|<=9 and north/south-wing rooms to |x|<=9, each starting no closer than |x| or
+    // |z|=9.5 respectively — verified by hand as non-overlapping bounding boxes (an earlier
+    // draft placed a north-wing room and an east-wing room close enough to the intersection
+    // that their footprints actually overlapped, so one room's solid wall silently cut through
+    // the other's interior — see this round's memory entry for how that was caught).
+    obstacleLayout: [
+      // East wing (main corridor, +X)
+      ...room(13, 6, 3.5, 3, 0, ["south"]), // Reception / waiting area
+      ...room(13, -6, 3, 3, 0, ["north"]), // Patient Room B
+      ...room(23, 6, 3, 3, 0, ["south"]), // Nurses' Station
+      ...room(23, -6, 3, 3, 0, ["north"]), // Patient Room A
+      // West wing (main corridor, -X)
+      ...room(-13, 6, 3, 3, 0, ["south"]), // Patient Room C
+      ...room(-13, -6, 3, 3, 0, ["north"]), // Break Room
+      // North wing (cross corridor, +Z)
+      ...room(6, 13, 3, 3.5, 0, ["west"]), // Operating Room
+      ...room(-6, 13, 2.2, 2.2, 0, ["east"]), // Supply Closet
+      // South wing (cross corridor, -Z)
+      ...room(6, -13, 3, 3, 0, ["west"]), // Patient Room D
+      ...room(-6, -13, 2.5, 2.5, 0, ["east"]), // Morgue / storage
+    ],
+    treeLayout: [],
+    // A row of fixtures down each corridor arm plus one inside every room — cool white-blue
+    // "fluorescent" tone, no shadows (cheap, matches this project's other small point lights —
+    // muzzle flash, mine, rocket glow).
+    interiorLights: [
+      { x: 0, z: 0 }, { x: 7, z: 0 }, { x: 13, z: 0 }, { x: 18, z: 0 }, { x: 23, z: 0 },
+      { x: -7, z: 0 }, { x: -13, z: 0 }, { x: -18, z: 0 },
+      { x: 0, z: 7 }, { x: 0, z: 13 }, { x: 0, z: -7 }, { x: 0, z: -13 },
+      { x: 13, z: 6 }, { x: 13, z: -6 }, { x: 23, z: 6 }, { x: 23, z: -6 },
+      { x: -13, z: 6 }, { x: -13, z: -6 },
+      { x: 6, z: 13 }, { x: -6, z: 13 }, { x: 6, z: -13 }, { x: -6, z: -13 },
+    ].map((l) => ({ ...l, color: 0xdceeff, intensity: 1.9, distance: 13 })),
+  },
 };
 
 export const DEFAULT_MAP_ID = "grassland";
@@ -515,6 +707,180 @@ function buildBuildingMesh(hx, hz, h, wallColor, roofColor, trimColor) {
   group.add(gableWest);
 
   return { group, roofPeakHeight: h + totalRise };
+}
+
+const STORY_HEIGHT = 2.8; // matches this file's existing single-story building height convention
+const WALL_HALF_THICKNESS = 0.12; // matches ROOF_THICKNESS — a believably solid-looking wall
+const DOOR_GAP_HALF_WIDTH = 0.85; // total 1.7 units — comfortably more than 2x the player's 0.9 diameter
+const STAIR_HALF_WIDTH = 0.75;
+const STAIR_HALF_RUN = 2.2; // rise (STORY_HEIGHT) over run (2*STAIR_HALF_RUN) gives a slope close to ROOF_PITCH — proven walkable via the roof
+const STAIR_GAP_MARGIN = 0.15; // clearance between the stair's own footprint and the floor-slab opening around it
+const STAIR_STEP_COUNT = 8;
+
+// A walkable multi-story building: unlike buildBuildingMesh (a single solid box — every
+// existing map's buildings stay exactly that, unchanged), this is built from several separate
+// wall/floor pieces with real gaps, so the player can actually walk through the door and up the
+// stairs instead of the door/windows being cosmetic overlays on an otherwise-solid box. Returns
+// `{ group, pieces, roofPeakHeight }` — `pieces` are plain **local-space** descriptors (offsets
+// from the building's own center, before the caller's own position/rotY is applied), since this
+// function has no idea where in the world the building actually sits; buildWorld's obstacle loop
+// rotates each piece's local offset into world space via the existing `localOffsetToWorld` helper
+// (the exact same technique it already uses for the car's cabin offset) and pushes it via
+// `pushObstaclePiece`/`pushRoofPrism`/`pushRamp`.
+//
+// Key simplification found while designing this: walls do NOT need to be split per story. A
+// wall spans the building's FULL height (ground to roof) and uses the *exact same* `slopeGate`
+// release the existing single-story roof already proves works — a player standing on an upper
+// floor is only ever near a wall at the floor's own inset interior edge, never inside the wall's
+// own (much thinner) footprint band, so the same "released only right at/above the real roof
+// height" rule that already works for a single story works unchanged for every story stacked
+// under it. Only the floor SLABS (one per internal story boundary) and the STAIR ramps connecting
+// them are genuinely new per-story pieces.
+function buildMultiStoryBuilding(hx, hz, stories, wallColor, roofColor, trimColor) {
+  const group = new THREE.Group();
+  const wallMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.88, metalness: 0.04 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: trimColor, roughness: 0.75, metalness: 0.05 });
+  const trimMat = new THREE.MeshStandardMaterial({ color: trimColor, roughness: 0.6, metalness: 0.1 });
+  const stepMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.7, metalness: 0.08 });
+
+  const totalHeight = stories * STORY_HEIGHT;
+  const pieces = [];
+
+  // --- Exterior walls: full building height, front wall split in two for the entrance gap ---
+  const frontHalfW = (hx - DOOR_GAP_HALF_WIDTH) / 2;
+  const wallSegs = [
+    { localX: -(DOOR_GAP_HALF_WIDTH + frontHalfW), localZ: hz - WALL_HALF_THICKNESS, wHx: frontHalfW, wHz: WALL_HALF_THICKNESS },
+    { localX: DOOR_GAP_HALF_WIDTH + frontHalfW, localZ: hz - WALL_HALF_THICKNESS, wHx: frontHalfW, wHz: WALL_HALF_THICKNESS },
+    { localX: 0, localZ: -(hz - WALL_HALF_THICKNESS), wHx: hx, wHz: WALL_HALF_THICKNESS },
+    { localX: -(hx - WALL_HALF_THICKNESS), localZ: 0, wHx: WALL_HALF_THICKNESS, wHz: hz },
+    { localX: hx - WALL_HALF_THICKNESS, localZ: 0, wHx: WALL_HALF_THICKNESS, wHz: hz },
+  ];
+  for (const seg of wallSegs) {
+    const body = new THREE.Mesh(new THREE.BoxGeometry(seg.wHx * 2, totalHeight, seg.wHz * 2), wallMat);
+    body.position.set(seg.localX, totalHeight / 2, seg.localZ);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+    pieces.push({ kind: "wall", localX: seg.localX, localZ: seg.localZ, hx: seg.wHx, hz: seg.wHz, top: totalHeight });
+  }
+
+  // A window row on the left/right walls at each story's mid-height — purely decorative, same
+  // flat-panel-just-outside-the-wall-plane technique buildBuildingMesh already uses; skipped on
+  // the front/back walls since the front already has the real doorway and this keeps the window
+  // count (and per-story authoring complexity) modest for a first pass.
+  const windowGeo = new THREE.BoxGeometry(0.05, 0.6, Math.min(0.6, hz * 0.3));
+  for (let i = 0; i < stories; i++) {
+    const winY = i * STORY_HEIGHT + STORY_HEIGHT * 0.55;
+    for (const side of [-1, 1]) {
+      const win = new THREE.Mesh(windowGeo, trimMat);
+      win.position.set(side * (hx + 0.03), winY, 0);
+      group.add(win);
+    }
+  }
+
+  // --- Floor slabs at each internal story boundary, split around a stairwell gap flush
+  // against the left wall's inner face ---
+  const interiorHx = hx - WALL_HALF_THICKNESS * 2;
+  const interiorHz = hz - WALL_HALF_THICKNESS * 2;
+  const stairGapMinX = -interiorHx;
+  const stairGapMaxX = stairGapMinX + STAIR_HALF_WIDTH * 2 + STAIR_GAP_MARGIN * 2;
+  const stairGapHalfD = STAIR_HALF_RUN + STAIR_GAP_MARGIN;
+  const stairCenterX = (stairGapMinX + stairGapMaxX) / 2;
+
+  for (let i = 1; i < stories; i++) {
+    const floorY = i * STORY_HEIGHT;
+    const floorPieces = [];
+    // Big piece: everything to the right of the stairwell, full depth.
+    const rightHx = (interiorHx - stairGapMaxX) / 2;
+    if (rightHx > 0.05) {
+      floorPieces.push({ localX: (stairGapMaxX + interiorHx) / 2, localZ: 0, hx: rightHx, hz: interiorHz });
+    }
+    // Front/back strips over the stairwell's own X-range, outside its Z-range.
+    if (interiorHz > stairGapHalfD + 0.05) {
+      const stripHz = (interiorHz - stairGapHalfD) / 2;
+      const stripHx = (stairGapMaxX - stairGapMinX) / 2;
+      floorPieces.push({ localX: stairCenterX, localZ: (stairGapHalfD + interiorHz) / 2, hx: stripHx, hz: stripHz });
+      floorPieces.push({ localX: stairCenterX, localZ: -(stairGapHalfD + interiorHz) / 2, hx: stripHx, hz: stripHz });
+    }
+    for (const fp of floorPieces) {
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(fp.hx * 2, WALL_HALF_THICKNESS * 2, fp.hz * 2), floorMat);
+      slab.position.set(fp.localX, floorY, fp.localZ);
+      slab.castShadow = true;
+      slab.receiveShadow = true;
+      group.add(slab);
+      pieces.push({ kind: "floor", localX: fp.localX, localZ: fp.localZ, hx: fp.hx, hz: fp.hz, top: floorY });
+    }
+
+    // --- Stair ramp connecting story i-1 to story i, plus a stepped visual on top of the one
+    // smooth ramp collision volume (the same simplification the roof's own slope already makes:
+    // a more detailed visual riding on one simple collision shape). ---
+    const wallTop = floorY - STORY_HEIGHT;
+    pieces.push({
+      kind: "ramp",
+      localX: stairCenterX,
+      localZ: 0,
+      hx: STAIR_HALF_WIDTH,
+      hz: STAIR_HALF_RUN,
+      wallTop,
+      peakTop: floorY,
+    });
+    const stepRise = STORY_HEIGHT / STAIR_STEP_COUNT;
+    const stepRun = (STAIR_HALF_RUN * 2) / STAIR_STEP_COUNT;
+    for (let k = 0; k < STAIR_STEP_COUNT; k++) {
+      const stepZ = -STAIR_HALF_RUN + (k + 0.5) * stepRun;
+      const stepY = wallTop + (k + 0.5) * stepRise;
+      const step = new THREE.Mesh(new THREE.BoxGeometry(STAIR_HALF_WIDTH * 2, stepRise, stepRun), stepMat);
+      step.position.set(stairCenterX, stepY, stepZ);
+      step.castShadow = true;
+      group.add(step);
+    }
+  }
+
+  // --- Roof on the top story only — identical technique to buildBuildingMesh's roof + gable
+  // caps, just built at `totalHeight` instead of a single story's height. Kept as a direct
+  // duplicate rather than a shared refactor to avoid touching buildBuildingMesh's proven,
+  // already-shipped code for every existing single-story map.
+  const halfDepthWithOverhang = hz + ROOF_OVERHANG_DEPTH;
+  const slopeLen = halfDepthWithOverhang / Math.cos(ROOF_PITCH);
+  const totalRise = halfDepthWithOverhang * Math.tan(ROOF_PITCH);
+  const ridgeLen = hx * 2 + ROOF_OVERHANG_RIDGE * 2;
+  const roofMat = new THREE.MeshStandardMaterial({ color: roofColor, roughness: 0.75, metalness: 0.05 });
+  const roofSlopeGeo = new THREE.BoxGeometry(ridgeLen, ROOF_THICKNESS, slopeLen);
+
+  const roofFront = new THREE.Mesh(roofSlopeGeo, roofMat);
+  roofFront.position.set(0, totalHeight + totalRise / 2, halfDepthWithOverhang / 2);
+  roofFront.rotation.x = ROOF_PITCH;
+  roofFront.castShadow = true;
+  group.add(roofFront);
+
+  const roofBack = new THREE.Mesh(roofSlopeGeo, roofMat);
+  roofBack.position.set(0, totalHeight + totalRise / 2, -halfDepthWithOverhang / 2);
+  roofBack.rotation.x = -ROOF_PITCH;
+  roofBack.castShadow = true;
+  group.add(roofBack);
+
+  const gableShape = new THREE.Shape();
+  const gableHalfSpan = hz + ROOF_OVERHANG_DEPTH;
+  gableShape.moveTo(-gableHalfSpan, 0);
+  gableShape.lineTo(gableHalfSpan, 0);
+  gableShape.lineTo(0, totalRise);
+  gableShape.closePath();
+  const gableGeo = new THREE.ExtrudeGeometry(gableShape, { depth: GABLE_THICKNESS, bevelEnabled: false });
+  const gableMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.88, metalness: 0.04, side: THREE.DoubleSide });
+
+  const gableEast = new THREE.Mesh(gableGeo, gableMat);
+  gableEast.rotation.y = Math.PI / 2;
+  gableEast.position.set(hx, totalHeight, 0);
+  gableEast.castShadow = true;
+  group.add(gableEast);
+
+  const gableWest = new THREE.Mesh(gableGeo, gableMat);
+  gableWest.rotation.y = Math.PI / 2;
+  gableWest.position.set(-hx - GABLE_THICKNESS, totalHeight, 0);
+  gableWest.castShadow = true;
+  group.add(gableWest);
+
+  return { group, pieces, roofPeakHeight: totalHeight + totalRise, totalHeight };
 }
 
 // A simple sedan: a lower body, a smaller cabin box on top, and four wheels. Faces +Z (its
@@ -772,6 +1138,43 @@ function buildSky(scene, topColor, bottomColor, celestialBody = "sun") {
   scene.add(celestialSprite);
 
   return { sunDir: sun, skyMesh: sky, celestialSprite };
+}
+
+// Streets/sidewalks — purely decorative, no collision entries at all. Ground is always one
+// uniform PlaneGeometry+material for the whole map (see buildWorld's single `ground` mesh), so
+// a paved road can't be painted onto it directly; this lays flat asphalt + sidewalk rectangles
+// slightly above y=0 instead (the same small-offset-to-avoid-z-fighting trick already used
+// elsewhere in this file), matching this project's all-flat-color aesthetic — no new texture
+// assets, same technique buildBuildingMesh's door/window overlays already use.
+const STREET_Y = 0.02;
+const SIDEWALK_Y = 0.035;
+const SIDEWALK_WIDTH = 1.4;
+function buildStreets(scene, added, streetLayout, asphaltColor, sidewalkColor) {
+  if (!streetLayout || !streetLayout.length) return;
+  const asphaltMat = new THREE.MeshStandardMaterial({ color: asphaltColor, roughness: 0.95, metalness: 0.02 });
+  const sidewalkMat = new THREE.MeshStandardMaterial({ color: sidewalkColor, roughness: 0.9, metalness: 0.02 });
+  streetLayout.forEach((s, idx) => {
+    // Two crossing streets (e.g. a "+" intersection) would otherwise sit exactly coplanar and
+    // z-fight in the overlap — a tiny per-segment Y step avoids it without being visible.
+    const y = STREET_Y + idx * 0.003;
+    const road = new THREE.Mesh(new THREE.BoxGeometry(s.width, 0.04, s.length), asphaltMat);
+    road.position.set(s.x, y, s.z);
+    road.rotation.y = s.rotY || 0;
+    road.receiveShadow = true;
+    scene.add(road);
+    added.push(road);
+
+    const sidewalkGeo = new THREE.BoxGeometry(SIDEWALK_WIDTH, 0.06, s.length);
+    for (const side of [-1, 1]) {
+      const sidewalk = new THREE.Mesh(sidewalkGeo, sidewalkMat);
+      const offset = localOffsetToWorld(side * (s.width / 2 + SIDEWALK_WIDTH / 2), 0, s.rotY || 0);
+      sidewalk.position.set(s.x + offset.x, SIDEWALK_Y + idx * 0.003, s.z + offset.z);
+      sidewalk.rotation.y = s.rotY || 0;
+      sidewalk.receiveShadow = true;
+      scene.add(sidewalk);
+      added.push(sidewalk);
+    }
+  });
 }
 
 function buildTrees(scene, obstacles, treeLayout, trunkColor, foliageColor) {
@@ -1045,6 +1448,8 @@ export function buildWorld(scene, mapId = DEFAULT_MAP_ID) {
   scene.add(ground);
   added.push(ground);
 
+  buildStreets(scene, added, map.streetLayout, map.streetColor ?? 0x3a3a3e, map.sidewalkColor ?? 0x9a9a94);
+
   const obstacles = [];
 
   const wallH = 3.2;
@@ -1066,12 +1471,31 @@ export function buildWorld(scene, mapId = DEFAULT_MAP_ID) {
     obstacles.push({ x: w.x, z: w.z, hx: w.hx, hz: w.hz, top: wallH, mesh, hitboxMesh });
   }
 
+  // A fully-indoor map (e.g. the hospital) caps the whole arena with a flat ceiling at wall
+  // height — purely visual, no collision entry at all (a double-jump apex is well under half
+  // this height, so there's no risk of a false mid-air block) — plus a handful of interior
+  // point-light fixtures, since a ceiling blocks the sun and hemi-only ambient would otherwise
+  // read as near-black indoors. Every outdoor map simply omits both fields.
+  if (map.ceiling) {
+    const ceilingMat = new THREE.MeshStandardMaterial({ color: map.wallColor, roughness: 0.9, metalness: 0.02, side: THREE.DoubleSide });
+    const ceiling = new THREE.Mesh(new THREE.BoxGeometry(arenaBound * 2, 0.1, arenaBound * 2), ceilingMat);
+    ceiling.position.y = wallH;
+    scene.add(ceiling);
+    added.push(ceiling);
+  }
+  for (const l of map.interiorLights || []) {
+    const light = new THREE.PointLight(l.color ?? 0xdceeff, l.intensity ?? 1.3, l.distance ?? 10);
+    light.position.set(l.x, l.y ?? wallH - 0.4, l.z);
+    scene.add(light);
+    added.push(light);
+  }
+
   // Pushes one collision piece (box or ellipse) sharing `mesh` for reference/disposal
   // grouping — a "compound" obstacle (a building's walls + ridge, a car's body + cabin) is
   // just several of these sharing one visual mesh, since every consumer (movement collision,
   // hitscan raycasts, the F4 overlay) already treats `obstacles` as a flat list of primitives
   // with no notion of "these N belong to one logical object" needed.
-  function pushObstaclePiece(x, z, hx, hz, top, rotY, mesh, shape = "box", { standable = true, slopeGate = null } = {}) {
+  function pushObstaclePiece(x, z, hx, hz, top, rotY, mesh, shape = "box", { standable = true, slopeGate = null, groundOnly = false } = {}) {
     const hitboxMesh = buildHitbox(x, z, hx, hz, top, rotY, shape);
     scene.add(hitboxMesh);
     added.push(hitboxMesh);
@@ -1086,6 +1510,16 @@ export function buildWorld(scene, mapId = DEFAULT_MAP_ID) {
     // `roofSlopeEffectiveTop` helper and its callers in resolveCollisions/collideProjectile for
     // why a flat gate here was a real bug, not just an approximation.
     if (slopeGate) entry.slopeGate = slopeGate;
+    // `groundOnly` (a multi-story building's interior floor slabs) makes resolveCollisions/
+    // collideProjectile skip this obstacle's horizontal push entirely, regardless of height — a
+    // floor/ceiling has no horizontal solidity of its own; only real walls should ever block
+    // sideways movement. Without this, a standable-but-not-groundOnly floor slab is (correctly,
+    // for something like a rock or car) solid below its own top for anyone approaching from
+    // outside its footprint — which is exactly wrong for an interior floor, since it would seal
+    // the ground floor off from ever reaching the floor's own footprint at all (including
+    // through the building's actual doorway), the moment a player at ground level tried to walk
+    // under it from any horizontal direction.
+    if (groundOnly) entry.groundOnly = true;
     obstacles.push(entry);
   }
 
@@ -1111,6 +1545,29 @@ export function buildWorld(scene, mapId = DEFAULT_MAP_ID) {
     });
   }
 
+  // A staircase ramp, as a real one-directional sloped standing surface — see the `shape ===
+  // "ramp"` branches in getGroundHeight/resolveCollisions/collideProjectile. Mirrors
+  // pushRoofPrism exactly (a dedicated push rather than pushObstaclePiece, since standing
+  // height/ledge threshold both vary by position), just a monotonic ramp instead of a
+  // symmetric ridge.
+  function pushRamp(x, z, hx, hzRamp, wallTop, peakTop, rotY, mesh) {
+    const hitboxMesh = buildHitbox(x, z, hx, hzRamp, peakTop, rotY, "ramp", wallTop);
+    scene.add(hitboxMesh);
+    added.push(hitboxMesh);
+    obstacles.push({
+      x,
+      z,
+      hx,
+      hz: hzRamp,
+      wallTop,
+      peakRise: peakTop - wallTop,
+      rotY,
+      shape: "ramp",
+      mesh,
+      hitboxMesh,
+    });
+  }
+
   const ROCK_COLLISION_HEIGHT_FACTOR = 0.48;
   const rockTint = new THREE.Color(map.rockTint);
   const rockEmissive = new THREE.Color(map.rockEmissive);
@@ -1125,6 +1582,55 @@ export function buildWorld(scene, mapId = DEFAULT_MAP_ID) {
     // same position-hash trick buildTrees already uses (deterministic, not Math.random()) so
     // a rock's spin is reproducible and shared with its hitbox instead of being cosmetic-only.
     const rotY = type === "rock" ? (o.x * 12.9898 + o.z * 78.233) % (Math.PI * 2) : o.rotY || 0;
+
+    // Walkable multi-story building — a genuinely different construction (separate wall/floor
+    // pieces with real gaps) from the single solid-box path below, so it's its own branch
+    // entirely rather than a tweak to it; every existing map's `stories`-less buildings fall
+    // through to the unchanged path underneath, byte-identical to before.
+    if (type === "building" && (o.stories || 1) > 1) {
+      const built = buildMultiStoryBuilding(
+        o.hx,
+        o.hz,
+        o.stories,
+        map.buildingWallColor ?? map.wallColor,
+        map.buildingRoofColor ?? map.rockTint,
+        map.buildingTrimColor ?? map.rockEmissive
+      );
+      mesh = built.group;
+      mesh.position.set(o.x, 0, o.z);
+      mesh.rotation.y = rotY;
+      scene.add(mesh);
+      added.push(mesh);
+
+      const roofHalfDepth = o.hz + ROOF_OVERHANG_DEPTH;
+      const roofPeakRise = built.roofPeakHeight - built.totalHeight;
+      for (const piece of built.pieces) {
+        const worldOffset = localOffsetToWorld(piece.localX, piece.localZ, rotY);
+        const worldX = o.x + worldOffset.x;
+        const worldZ = o.z + worldOffset.z;
+        if (piece.kind === "ramp") {
+          pushRamp(worldX, worldZ, piece.hx, piece.hz, piece.wallTop, piece.peakTop, rotY, mesh);
+        } else if (piece.kind === "wall") {
+          // Every wall piece spans the building's full height (see buildMultiStoryBuilding's
+          // comment on why walls don't need per-story splitting) — same slopeGate treatment
+          // the single-story path below already uses, just gating against this building's
+          // actual total height instead of a single story's.
+          pushObstaclePiece(worldX, worldZ, piece.hx, piece.hz, piece.top, rotY, mesh, "box", {
+            standable: false,
+            slopeGate: { hz: roofHalfDepth, wallTop: built.totalHeight, peakRise: roofPeakRise },
+          });
+        } else {
+          // Floor slabs — standable (getGroundHeight offers them as a landing height) but
+          // `groundOnly` so they never block horizontal movement (see pushObstaclePiece) —
+          // without this, the ground floor would be sealed off from ever reaching its own
+          // interior at all, including through the actual doorway, since a plain standable box
+          // is solid for anyone approaching its footprint from outside at a lower height.
+          pushObstaclePiece(worldX, worldZ, piece.hx, piece.hz, piece.top, rotY, mesh, "box", { groundOnly: true });
+        }
+      }
+      pushRoofPrism(o.x, o.z, o.hx, roofHalfDepth, built.totalHeight, built.roofPeakHeight, rotY, mesh);
+      continue;
+    }
 
     if (type === "building") {
       const built = buildBuildingMesh(
@@ -1195,6 +1701,23 @@ export function buildWorld(scene, mapId = DEFAULT_MAP_ID) {
       continue;
     }
 
+    // A plain interior wall segment (see room() above) — a solid box up to the same height as
+    // this arena's own perimeter walls, no roof/door/slope-gate machinery at all, since nothing
+    // ever stands above it (an indoor map's ceiling sits well out of jump reach) and it's
+    // already split with real door gaps at the authoring level, not here.
+    if (type === "wall") {
+      const wallMat = new THREE.MeshStandardMaterial({ color: map.wallColor, roughness: 0.9, metalness: 0.03 });
+      mesh = new THREE.Mesh(new THREE.BoxGeometry(o.hx * 2, wallH, o.hz * 2), wallMat);
+      mesh.position.set(o.x, wallH / 2, o.z);
+      mesh.rotation.y = rotY;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+      added.push(mesh);
+      pushObstaclePiece(o.x, o.z, o.hx, o.hz, wallH, rotY, mesh);
+      continue;
+    }
+
     // Rocks (and, below, trees) are round-ish blobs, not rectangles — an ellipse inscribed
     // in the same hx/hz hugs their actual silhouette far better than a box does.
     mesh = buildRockMesh(o.hx, o.hz, o.h, rockTint, rockEmissive);
@@ -1222,7 +1745,17 @@ export function buildWorld(scene, mapId = DEFAULT_MAP_ID) {
     scene.fog = null;
   }
 
-  return { obstacles, groundMaterial: groundMat, arenaBound, dispose, updateSky };
+  return {
+    obstacles,
+    groundMaterial: groundMat,
+    arenaBound,
+    // Passed straight into Player.update's ceilingHeight param (see player.js) — Infinity for
+    // every outdoor map (no cap at all), the ceiling's own real height for an indoor one, so
+    // hitting it actually stops upward movement instead of just looking solid.
+    ceilingHeight: map.ceiling ? wallH : Infinity,
+    dispose,
+    updateSky,
+  };
 }
 
 const LEDGE_TOLERANCE = 0.4; // how far short of a platform's top a jump can still catch it
@@ -1266,6 +1799,16 @@ function roofSlopeEffectiveTop(dx, dz, rotY, gate) {
   const local = worldOffsetToLocal(dx, dz, rotY);
   const clampedZ = Math.max(-gate.hz, Math.min(gate.hz, local.z));
   return gate.wallTop + gate.peakRise * (1 - Math.abs(clampedZ) / gate.hz);
+}
+
+// A staircase ramp's standing height — monotonic, not peaked like a roof: wallTop at local
+// z=-hz, rising linearly to wallTop+peakRise at local z=+hz. Clamped the same way
+// roofSlopeEffectiveTop is, for the same reason (a sensible answer just past the ramp's own
+// footprint rather than extrapolating past it).
+function rampEffectiveTop(dx, dz, rotY, gate) {
+  const local = worldOffsetToLocal(dx, dz, rotY);
+  const clampedZ = Math.max(-gate.hz, Math.min(gate.hz, local.z));
+  return gate.wallTop + gate.peakRise * ((clampedZ + gate.hz) / (2 * gate.hz));
 }
 
 // True if world point (x, z) falls within obstacle o's (possibly rotated) footprint. Two
@@ -1312,15 +1855,17 @@ function closestOffsetOnObstacle(dx, dz, o) {
 export function getGroundHeight(x, z, feetYBeforeLanding, obstacles) {
   let ground = 0;
   for (const o of obstacles) {
-    if (o.shape === "roofPrism") {
-      // Standing height matches the visible roof's own slope (see roofSlopeEffectiveTop) —
-      // a player walking across it lands exactly on the visible surface instead of the single
-      // flat height a plain box/ellipse obstacle would give. Still requires being inside the
-      // roof's actual (x,z) footprint first (unlike resolveCollisions' gate, which clamps
-      // instead — see that function for why the two need different edge behavior here).
+    if (o.shape === "roofPrism" || o.shape === "ramp") {
+      // Standing height matches the visible slope (roof or staircase — see
+      // roofSlopeEffectiveTop/rampEffectiveTop) — a player walking across it lands exactly on
+      // the visible surface instead of the single flat height a plain box/ellipse obstacle
+      // would give. Still requires being inside the shape's actual (x,z) footprint first
+      // (unlike resolveCollisions' gate, which clamps instead — see that function for why the
+      // two need different edge behavior here).
       const local = worldOffsetToLocal(x - o.x, z - o.z, o.rotY);
       if (Math.abs(local.x) > o.hx || Math.abs(local.z) > o.hz) continue;
-      const effectiveTop = roofSlopeEffectiveTop(x - o.x, z - o.z, o.rotY, o);
+      const effectiveTop =
+        o.shape === "ramp" ? rampEffectiveTop(x - o.x, z - o.z, o.rotY, o) : roofSlopeEffectiveTop(x - o.x, z - o.z, o.rotY, o);
       if (feetYBeforeLanding >= effectiveTop - LEDGE_TOLERANCE) {
         ground = Math.max(ground, effectiveTop);
       }
@@ -1337,15 +1882,19 @@ export function getGroundHeight(x, z, feetYBeforeLanding, obstacles) {
 
 export function resolveCollisions(pos, radius, obstacles, feetY = 0, arenaBound = ARENA_BOUND) {
   for (const o of obstacles) {
+    if (o.groundOnly) continue; // a floor/ceiling slab — never blocks sideways movement, see pushObstaclePiece
     const dx = pos.x - o.x;
     const dz = pos.z - o.z;
 
-    if (o.shape === "roofPrism" || o.slopeGate) {
+    if (o.shape === "roofPrism" || o.shape === "ramp" || o.slopeGate) {
       // Both the roof prism itself and the wall box beneath it (via `slopeGate`) gate their
       // horizontal push on the *roof's* real sloped height at this (x,z), not a flat value —
       // using the clamped (not footprint-checked) form, unlike getGroundHeight, so a query
       // just past the roof's own edge still gets a sensible falling-off-toward-eave threshold
-      // instead of abruptly having no gate at all right at the boundary.
+      // instead of abruptly having no gate at all right at the boundary. A staircase ramp
+      // (`shape: "ramp"`) is its own self-contained obstacle, same as roofPrism — it never
+      // appears as a `slopeGate` on some other piece, since nothing needs to be "released" by
+      // a staircase the way a wall needs releasing by the roof above it.
       //
       // This matters two ways: (1) a flat threshold on either piece alone left a height band
       // where a well-timed jump could slip past both with nothing solid to catch it, flying
@@ -1355,9 +1904,21 @@ export function resolveCollisions(pos, radius, obstacles, feetY = 0, arenaBound 
       // underneath, so an unconditional wall kept fighting completely normal movement anywhere
       // near its own footprint edge (well inside the visually-walkable roof surface). Gating
       // both pieces on the *same* real roof height fixes both at once.
-      const gate = o.shape === "roofPrism" ? o : o.slopeGate;
-      const effectiveTop = roofSlopeEffectiveTop(dx, dz, o.rotY, gate);
+      const gate = o.shape === "roofPrism" || o.shape === "ramp" ? o : o.slopeGate;
+      const effectiveTop = o.shape === "ramp" ? rampEffectiveTop(dx, dz, o.rotY, gate) : roofSlopeEffectiveTop(dx, dz, o.rotY, gate);
       if (feetY >= effectiveTop - LEDGE_TOLERANCE) continue;
+      // A roof prism's own footprint (hx x hz+overhang) covers the *whole* building, including
+      // straight through any doorway gap in the walls beneath it — the roof was never meant to
+      // block anything at ground level (only to catch/support someone already up near roof
+      // height), that just happened to never matter for a single-story solid-box building where
+      // the wall already covered the same footprint underneath anyway. A real walkable multi-
+      // story building's doorway would otherwise be silently blocked by the roof piece even
+      // though the wall piece beneath it correctly has a gap — skip the roof prism entirely
+      // for anyone clearly below the eave; the wall's own (gap-aware) piece is what actually
+      // governs blocking down there. Doesn't apply to `ramp`/`slopeGate`-only pieces, which have
+      // no such "empty space directly underneath" case (a ramp is real stairs; a wall gated by a
+      // roof's slope is still exactly that wall's own true footprint, doorway gaps and all).
+      if (o.shape === "roofPrism" && feetY < gate.wallTop - LEDGE_TOLERANCE) continue;
     } else if (o.top !== undefined && feetY >= o.top - LEDGE_TOLERANCE) {
       // Same threshold as getGroundHeight's ledge catch — otherwise the horizontal push keeps
       // the player out of the footprint during the exact window a jump would otherwise catch it.
@@ -1386,15 +1947,20 @@ export function resolveCollisions(pos, radius, obstacles, feetY = 0, arenaBound 
 // above the obstacle's top — it's sailing over, not hitting the side.
 export function collideProjectile(pos, velocity, radius, obstacles, restitution = 0.4) {
   for (const o of obstacles) {
+    if (o.groundOnly) continue; // a floor/ceiling slab — never blocks sideways movement, see pushObstaclePiece
     const dx = pos.x - o.x;
     const dz = pos.z - o.z;
 
-    if (o.shape === "roofPrism" || o.slopeGate) {
-      // Same reasoning as resolveCollisions — gate against the real sloped roof height at this
-      // (x,z), not a flat value, for both the roof prism and the wall box beneath it.
-      const gate = o.shape === "roofPrism" ? o : o.slopeGate;
-      const effectiveTop = roofSlopeEffectiveTop(dx, dz, o.rotY, gate);
+    if (o.shape === "roofPrism" || o.shape === "ramp" || o.slopeGate) {
+      // Same reasoning as resolveCollisions — gate against the real sloped roof/ramp height at
+      // this (x,z), not a flat value.
+      const gate = o.shape === "roofPrism" || o.shape === "ramp" ? o : o.slopeGate;
+      const effectiveTop = o.shape === "ramp" ? rampEffectiveTop(dx, dz, o.rotY, gate) : roofSlopeEffectiveTop(dx, dz, o.rotY, gate);
       if (pos.y >= effectiveTop) continue;
+      // Same reasoning as resolveCollisions — a roof prism's own footprint spans the whole
+      // building regardless of any doorway gap in the walls beneath it; skip it entirely below
+      // the eave so a grenade/rocket can fly through the door same as a player can walk through it.
+      if (o.shape === "roofPrism" && pos.y < gate.wallTop) continue;
     } else if (o.top !== undefined && pos.y >= o.top) {
       continue;
     }

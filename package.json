@@ -12,6 +12,7 @@
     "tunnel:client": ".\\tools\\cloudflared.exe tunnel --url http://localhost:5173"
   },
   "devDependencies": {
+    "playwright": "^1.62.1",
     "vite": "^8.2.0"
   },
   "dependencies": {

@@ -14,6 +14,7 @@ const GRAVITY = -22;
 const JUMP_SPEED = 8;
 const MAX_JUMPS = 2;
 const FLY_SPEED = 20; // dev tool — fast enough to cross a whole map in a few seconds
+const HEAD_CLEARANCE = 0.15; // how far above the eye-height camera position the top of the head sits
 
 export const STAMINA_MAX = 100;
 const STAMINA_DRAIN_RATE = 28; // per second while actually sprinting AND moving — a full bar lasts ~3.6s of sprint
@@ -67,7 +68,7 @@ export class Player {
     this.velocity.z = (dirZ / len) * speed;
   }
 
-  update(dt, input, obstacles, arenaBound = ARENA_BOUND) {
+  update(dt, input, obstacles, arenaBound = ARENA_BOUND, ceilingHeight = Infinity) {
     if (this.flying) {
       this.updateFlying(dt, input);
       return;
@@ -148,6 +149,19 @@ export class Player {
     pos.x += this.velocity.x * dt;
     pos.z += this.velocity.z * dt;
     pos.y += this.velocity.y * dt;
+
+    // A fully-indoor map's ceiling (see world.js's `map.ceiling` flag) is a flat plane with no
+    // notion of a per-obstacle footprint to push against — it spans the whole arena, so the
+    // simplest correct model is a hard cap on how high the camera (and therefore the head, a
+    // small clearance above eye level) can ever get, same spirit as the arena's own outer-bound
+    // clamp on pos.x/pos.z further down. Outdoor maps pass Infinity (the default), so this is a
+    // no-op everywhere except a ceilinged map. Killing upward velocity on contact (rather than
+    // just clamping position every frame) is what makes hitting it actually feel like a real
+    // ceiling — otherwise a jump would silently stall in midair with velocity.y still positive.
+    if (pos.y + HEAD_CLEARANCE > ceilingHeight) {
+      pos.y = ceilingHeight - HEAD_CLEARANCE;
+      if (this.velocity.y > 0) this.velocity.y = 0;
+    }
 
     // Eye height lerps smoothly toward the standing/crouched target rather than snapping, so
     // the camera visibly sinks/rises over CROUCH_TRANSITION_RATE rather than popping instantly.

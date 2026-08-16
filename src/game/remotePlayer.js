@@ -35,6 +35,21 @@ const PLAYER_COLORS = [0x3a5f7a, 0x7a3a3a, 0x7a6a3a, 0x5a3a7a, 0x3a7a6a, 0x7a3a6
 const POS_LERP_SPEED = 12;
 const ROT_LERP_SPEED = 10;
 
+// Post-respawn invincibility shield — broadcast by the owning client (main.js's `invincibleTimer
+// > 0`) in every position tick, so peers can see at a glance that shooting this player won't
+// land a hit rather than only finding out via a "no damage" surprise. A low-poly sphere
+// enveloping the whole body (shared geometry across every RemotePlayer instance — it never
+// changes shape, only opacity — but a per-instance material, since opacity is mutated every
+// frame and two players can be invincible at once with independent pulse phases). Same cyan-blue
+// accent color as the local player's own screen-edge invincibility vignette, so it reads as the
+// same effect from both sides of the encounter.
+const INVINCIBLE_GLOW_RADIUS = 1.15;
+const INVINCIBLE_GLOW_COLOR = 0x4de3ff;
+const INVINCIBLE_GLOW_MIN_OPACITY = 0.12;
+const INVINCIBLE_GLOW_MAX_OPACITY = 0.32;
+const INVINCIBLE_GLOW_PULSE_SPEED = 5.7; // radians/sec — matches the ~1.1s period of the local invincible-vignette CSS pulse
+const invincibleGlowGeo = new THREE.SphereGeometry(INVINCIBLE_GLOW_RADIUS, 12, 8);
+
 function buildNameTagSprite(name) {
   const canvas = document.createElement("canvas");
   canvas.width = 256;
@@ -76,6 +91,8 @@ export class RemotePlayer {
     this.walkPhase = Math.random() * Math.PI * 2;
     this.swingAmount = 0;
     this.gunFlashTime = 0;
+    this.invincible = false;
+    this.invincibleGlowPhase = 0;
 
     this.targetPos = new THREE.Vector3(x, 0, z);
     this.targetRotY = 0;
@@ -129,6 +146,18 @@ export class RemotePlayer {
     this.nameTagMat = nameTag.mat;
     this.nameTagTexture = nameTag.texture;
 
+    this.invincibleGlowMat = new THREE.MeshBasicMaterial({
+      color: INVINCIBLE_GLOW_COLOR,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.invincibleGlow = new THREE.Mesh(invincibleGlowGeo, this.invincibleGlowMat);
+    this.invincibleGlow.position.y = 0.95;
+    this.invincibleGlow.visible = false;
+    this.group.add(this.invincibleGlow);
+
     this.group.position.set(x, 0, z);
     scene.add(this.group);
   }
@@ -151,12 +180,13 @@ export class RemotePlayer {
   // Latest state from a "pos" relay message — stored as a lerp target, not applied
   // immediately, so movement between the ~15Hz updates still reads smoothly. Includes
   // the network Y (feet height) so jumps/falls are visible, not just XZ movement.
-  updateFromNetwork(x, y, z, rotY, health, isMoving, weaponId, pitch) {
+  updateFromNetwork(x, y, z, rotY, health, isMoving, weaponId, pitch, invincible) {
     this.targetPos.set(x, y, z);
     this.targetRotY = rotY;
     this.health = health;
     this.isMoving = isMoving;
     this.targetPitch = pitch || 0;
+    this.invincible = !!invincible;
     if (weaponId) this.setWeapon(weaponId);
   }
 
@@ -194,6 +224,14 @@ export class RemotePlayer {
     this.head.rotation.x = clamp(this.pitch * HEAD_PITCH_SCALE, -HEAD_PITCH_MAX, HEAD_PITCH_MAX);
 
     this.visual.position.y = Math.abs(Math.sin(this.walkPhase)) * 0.04 * swing;
+
+    this.invincibleGlow.visible = this.invincible;
+    if (this.invincible) {
+      this.invincibleGlowPhase += dt * INVINCIBLE_GLOW_PULSE_SPEED;
+      const pulse = (Math.sin(this.invincibleGlowPhase) + 1) / 2; // 0..1
+      this.invincibleGlowMat.opacity =
+        INVINCIBLE_GLOW_MIN_OPACITY + pulse * (INVINCIBLE_GLOW_MAX_OPACITY - INVINCIBLE_GLOW_MIN_OPACITY);
+    }
 
     updateHealthBarSprite(this.healthBarFg, this.healthBarFgMat, this.health / this.maxHealth, cameraRight);
     if (cameraPos) {
@@ -237,6 +275,7 @@ export class RemotePlayer {
     const parts = breakApartHumanoid(scene, this.group, this.parts, blast);
     this.nameTagMat.dispose();
     this.nameTagTexture.dispose();
+    this.invincibleGlowMat.dispose(); // per-instance material (opacity mutated independently per player) — the geometry itself is shared, so only this needs disposing
     return parts;
   }
 
@@ -244,5 +283,6 @@ export class RemotePlayer {
     scene.remove(this.group);
     this.nameTagMat.dispose();
     this.nameTagTexture.dispose();
+    this.invincibleGlowMat.dispose();
   }
 }

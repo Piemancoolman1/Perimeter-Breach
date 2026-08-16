@@ -1,0 +1,475 @@
+<title>Perimeter Breach Character Brief</title>
+<style>
+  :root {
+    --bg: #12161a;
+    --panel: #1a2126;
+    --panel-2: #1f272d;
+    --line: rgba(143, 163, 173, 0.16);
+    --accent: #4de3ff;
+    --accent-dim: rgba(77, 227, 255, 0.4);
+    --text: #e8f2f5;
+    --muted: #93a7b0;
+    --tag: #6fd8e8;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .mono {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", "Consolas", monospace;
+  }
+
+  .sheet {
+    max-width: 660px;
+    margin: 0 auto;
+    padding: 56px 28px 72px;
+  }
+
+  header {
+    margin-bottom: 40px;
+  }
+
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--tag);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 22px;
+    height: 1px;
+    background: var(--accent-dim);
+  }
+
+  h1 {
+    font-size: 30px;
+    line-height: 1.15;
+    margin: 0 0 12px;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  .lede {
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1.55;
+    max-width: 54ch;
+    margin: 0;
+  }
+
+  /* Reference diagram */
+  .diagram-wrap {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 20px 20px 14px;
+    margin: 0 0 40px;
+  }
+  .diagram-caption {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-top: 10px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+  }
+  .diagram-caption .mono {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  /* Spec sections */
+  .spec {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 20px;
+    padding: 22px 0;
+    border-top: 1px solid var(--line);
+  }
+  .spec:last-of-type {
+    border-bottom: 1px solid var(--line);
+  }
+  .spec .tag {
+    font-size: 11px;
+    color: var(--tag);
+    letter-spacing: 0.08em;
+    padding-top: 3px;
+  }
+  .spec h2 {
+    font-size: 16px;
+    margin: 0 0 8px;
+    font-weight: 600;
+  }
+  .spec p {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font-size: 14.5px;
+    line-height: 1.6;
+    max-width: 56ch;
+  }
+  .spec p:last-child { margin-bottom: 0; }
+  .spec strong { color: var(--text); font-weight: 600; }
+  .spec code {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", "Consolas", monospace;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 1px 6px;
+    font-size: 0.92em;
+    color: var(--text);
+  }
+
+  .options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  .option {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 12px 14px;
+  }
+  .option .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  .option .head span:first-child {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .option .pill {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", "Consolas", monospace;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--bg);
+    background: var(--accent);
+    border-radius: 20px;
+    padding: 2px 8px;
+  }
+  .option.alt .pill {
+    color: var(--tag);
+    background: transparent;
+    border: 1px solid var(--accent-dim);
+  }
+  .option p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+
+  footer {
+    margin-top: 40px;
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  footer p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.6;
+    max-width: 44ch;
+  }
+  footer .mono {
+    font-size: 11px;
+    color: var(--tag);
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 480px) {
+    .spec { grid-template-columns: 1fr; gap: 6px; }
+    h1 { font-size: 26px; }
+  }
+</style>
+
+<div class="sheet">
+
+  <header>
+    <div class="eyebrow mono">Asset Brief · Perimeter Breach</div>
+    <h1>Playable Character Model</h1>
+    <p class="lede">
+      One humanoid character for a browser shooter — rounded, soft, chunky style,
+      not the blocky placeholder look. Everything below is what I need to drop it
+      straight into the game — send it as a single <code>.glb</code> when it's ready.
+    </p>
+  </header>
+
+  <div class="diagram-wrap">
+    <canvas id="rig" width="1200" height="640"></canvas>
+    <div class="diagram-caption">
+      <span class="mono">FIG. 1 — SCALE &amp; POSE REFERENCE</span>
+      <span class="mono">UNITS: METERS</span>
+    </div>
+  </div>
+
+  <div class="spec">
+    <div class="tag mono">01 / STYLE</div>
+    <div>
+      <h2>Rounded &amp; chunky — think PEAK, not a tech demo</h2>
+      <p>
+        New direction, replacing the old blocky look: soft, rounded, toy-like
+        proportions — capsule-ish limbs, a rounded head, smooth curved surfaces
+        instead of flat panels and hard corners. <strong>PEAK</strong> is the closest
+        touchstone — stylized and a little cute, not realistic.
+      </p>
+      <p>
+        Smooth-shade the curved surfaces (soft normals, not faceted) — that's what
+        actually reads as "rounded" rather than just a low-poly ball. Curves need
+        more geometry than flat boxes did to look clean; roughly
+        <strong>4,000–8,000 triangles</strong> for the whole character is a
+        reasonable target. Materials stay simple either way — flat base color plus
+        roughness/metalness, no hand-painted texture work needed.
+      </p>
+    </div>
+  </div>
+
+  <div class="spec">
+    <div class="tag mono">02 / SCALE</div>
+    <div>
+      <h2>~1.75m tall, standing, feet at the origin</h2>
+      <p>
+        Model at real-world scale (<strong>1 unit = 1 meter</strong>), <strong>Y-up</strong>,
+        standing in a neutral A-pose or T-pose with feet resting on <code>y = 0</code>.
+        Face a single consistent direction — it doesn't matter which way, just
+        be consistent so I can line it up on import.
+      </p>
+    </div>
+  </div>
+
+  <div class="spec">
+    <div class="tag mono">03 / PIECES</div>
+    <div>
+      <h2>Keep head, torso, arms &amp; legs as separate objects</h2>
+      <p>
+        Don't weld the body into one continuous mesh. When a character dies in
+        the game it <strong>breaks apart into its individual limbs</strong>, each
+        one flying off on its own — that only works if the file actually
+        contains six separate objects (<code>head</code>, <code>torso</code>,
+        <code>armL</code>, <code>armR</code>, <code>legL</code>, <code>legR</code>),
+        touching at the joints but not merged/boolean'd into a single piece.
+      </p>
+      <p>
+        With rounded parts specifically, let each piece overlap slightly into its
+        neighbor at the joint (a flush butt-join that worked fine for flat boxes
+        will show a visible seam/gap on a curved surface).
+      </p>
+      <p>
+        This is the one easy-to-miss step — it's a normal thing to clean up
+        during modeling, so flag it for whoever does the final export pass too.
+      </p>
+      <p>
+        One more thing on <code>armR</code>: don't model a weapon into its hand.
+        The gun is a separate piece the game attaches in code, so every class
+        can hold a different one. Just pose/shape the hand as if it's gripping
+        something roughly pistol-sized — a loose fist with the index finger
+        forward is plenty.
+      </p>
+    </div>
+  </div>
+
+  <div class="spec">
+    <div class="tag mono">04 / RIG</div>
+    <div>
+      <h2>Pick one — static is the easier start</h2>
+      <div class="options">
+        <div class="option">
+          <div class="head"><span>Static mesh</span><span class="pill">RECOMMENDED FIRST PASS</span></div>
+          <p>No skeleton — just the six separate, posed pieces from above. I can
+            still make it walk, turn, aim, and break apart on death in code.
+            Smallest scope, and it's what supports the death effect directly.</p>
+        </div>
+        <div class="option alt">
+          <div class="head"><span>Rigged &amp; skinned</span><span class="pill">LATER, IF WE WANT ANIMATION</span></div>
+          <p>Standard bipedal skeleton, one continuous mesh weight-painted to it.
+            Buys a real animated walk cycle, but a single skinned mesh can't
+            break apart the same way — we'd need a separate solution for the
+            death effect if we go this route. Worth doing once the static
+            version is proven out.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="spec">
+    <div class="tag mono">05 / EXPORT</div>
+    <div>
+      <h2>glTF 2.0, as a single <code>.glb</code></h2>
+      <p>
+        Cinema 4D exports this natively. One file, textures embedded — no loose
+        image files to keep track of. That's the format the game's engine
+        (three.js) reads directly.
+      </p>
+    </div>
+  </div>
+
+  <footer>
+    <p>Questions on any of this — just ask. Happier to clarify up front than
+      redo the model after.</p>
+    <span class="mono">v2 · perimeter breach</span>
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    const canvas = document.getElementById("rig");
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height;
+
+    const ink = "#4de3ff";
+    const inkDim = "rgba(77, 227, 255, 0.45)";
+    const fill = "rgba(77, 227, 255, 0.12)";
+    const rule = "rgba(143, 163, 173, 0.35)";
+    const label = "#93a7b0";
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Ground line sits near the bottom; meters-per-pixel derived from a 1.85m
+    // total figure height so the ruler and the figure agree exactly.
+    const groundY = H - 60;
+    const topY = 70;
+    const metersTall = 1.85;
+    const pxPerM = (groundY - topY) / metersTall;
+    const cx = 430;
+
+    function yAt(meters) { return groundY - meters * pxPerM; }
+
+    // Vertical ruler with tick marks.
+    const rulerX = 90;
+    ctx.strokeStyle = rule;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(rulerX, groundY);
+    ctx.lineTo(rulerX, topY);
+    ctx.stroke();
+
+    ctx.font = "12px ui-monospace, SFMono-Regular, Consolas, monospace";
+    ctx.fillStyle = label;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    [0, 0.5, 1.0, 1.5, 1.7, 1.8].forEach((m) => {
+      const y = yAt(m);
+      const tick = m === 1.7 || m === 1.8 ? 12 : 7;
+      ctx.strokeStyle = m === 1.7 || m === 1.8 ? ink : rule;
+      ctx.beginPath();
+      ctx.moveTo(rulerX - tick, y);
+      ctx.lineTo(rulerX, y);
+      ctx.stroke();
+      ctx.fillStyle = m === 1.7 || m === 1.8 ? ink : label;
+      ctx.fillText(m.toFixed(1) + "m", rulerX - tick - 8, y);
+    });
+
+    // Guide lines across to the figure for eye-height and total-height.
+    function guide(meters, dashed) {
+      const y = yAt(meters);
+      ctx.strokeStyle = inkDim;
+      ctx.setLineDash(dashed ? [4, 4] : []);
+      ctx.beginPath();
+      ctx.moveTo(rulerX, y);
+      ctx.lineTo(cx + 140, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    guide(1.7, true);
+    guide(1.85, true);
+
+    ctx.textAlign = "left";
+    ctx.fillStyle = ink;
+    ctx.fillText("EYE HEIGHT · 1.70m", cx + 150, yAt(1.7));
+    ctx.fillText("TOTAL HEIGHT · ~1.80–1.85m", cx + 150, yAt(1.85));
+
+    // Ground line.
+    ctx.strokeStyle = rule;
+    ctx.beginPath();
+    ctx.moveTo(60, groundY);
+    ctx.lineTo(cx + 300, groundY);
+    ctx.stroke();
+    ctx.fillStyle = label;
+    ctx.textAlign = "left";
+    ctx.fillText("y = 0", cx + 260, groundY + 18);
+
+    // Rounded, chunky figure — capsule-ish limbs and a circular head, a
+    // deliberate stand-in for "match this style" (soft and PEAK-like) rather
+    // than a plain stick figure or the old blocky boxes.
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 2;
+
+    // A rounded rectangle; passing radius = w/2 turns it into a full capsule
+    // (flat sides, semicircular caps) — used for limbs. A smaller radius gives
+    // a softly rounded box — used for the torso.
+    function roundedBlock(xC, yTop, w, h, r) {
+      const x = xC - w / 2;
+      const rr = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + rr, yTop);
+      ctx.lineTo(x + w - rr, yTop);
+      ctx.arcTo(x + w, yTop, x + w, yTop + rr, rr);
+      ctx.lineTo(x + w, yTop + h - rr);
+      ctx.arcTo(x + w, yTop + h, x + w - rr, yTop + h, rr);
+      ctx.lineTo(x + rr, yTop + h);
+      ctx.arcTo(x, yTop + h, x, yTop + h - rr, rr);
+      ctx.lineTo(x, yTop + rr);
+      ctx.arcTo(x, yTop, x + rr, yTop, rr);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    function circle(xC, yC, r) {
+      ctx.beginPath();
+      ctx.arc(xC, yC, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    const headR = 0.16 * pxPerM;
+    const headCy = yAt(1.85) + headR;
+    circle(cx, headCy, headR);
+
+    const torsoTop = headCy + headR - 6; // slight overlap into the head joint
+    const torsoH = 0.7 * pxPerM;
+    const torsoW = 0.5 * pxPerM;
+    roundedBlock(cx, torsoTop, torsoW, torsoH, torsoW * 0.35);
+
+    const armW = 0.15 * pxPerM;
+    const armH = torsoH - 6;
+    roundedBlock(cx - 0.42 * pxPerM, torsoTop + 4, armW, armH, armW / 2);
+    roundedBlock(cx + 0.42 * pxPerM, torsoTop + 4, armW, armH, armW / 2);
+
+    const legTop = torsoTop + torsoH - 8; // slight overlap into the torso joint
+    const legH = groundY - legTop;
+    const legW = 0.19 * pxPerM;
+    roundedBlock(cx - 0.15 * pxPerM, legTop, legW, legH, legW / 2);
+    roundedBlock(cx + 0.15 * pxPerM, legTop, legW, legH, legW / 2);
+  })();
+</script>

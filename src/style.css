@@ -491,6 +491,20 @@ body.touch-controls-active #touch-controls {
   50% { opacity: 0.85; }
 }
 
+/* Low-health screen edge — opacity is set directly from JS each frame as a continuous function
+   of current health (see setHud() in main.js), not toggled on/off like invincible-vignette —
+   the red edge gradually intensifies the more hurt the player is, rather than snapping on at
+   a fixed threshold. */
+#low-health-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(200, 10, 20, 0) 40%, rgba(200, 10, 20, 0.9) 100%);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 4;
+  transition: opacity 0.2s ease-out;
+}
+
 #invincible-indicator {
   position: absolute;
   top: calc(50% - 46px);
