@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "PerimeterBreach",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "identifier": "com.piemancoolman.perimeterbreach",
   "build": {
     "frontendDist": "../dist",
@@ -18,7 +18,8 @@
         "resizable": true,
         "center": true,
         "fullscreen": false,
-        "devtools": true
+        "devtools": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disk-cache-size=1 --media-cache-size=1"
       }
     ],
     "security": {
