@@ -29,13 +29,16 @@ export async function checkForUpdate() {
   try {
     const { check } = await import("@tauri-apps/plugin-updater");
     update = await check();
-    if (update) {
-      // Confirm with a second check a couple seconds later before ever showing the
-      // banner — the very first check right at app boot has intermittently found an
-      // "update" that a check moments later says doesn't exist (looks like GitHub's CDN
-      // briefly serving a stale manifest right at that instant). Only surfacing the
-      // banner once two checks agree avoids flashing it incorrectly in that window.
-      await new Promise((r) => setTimeout(r, 2000));
+    // Confirm with more checks, spaced well apart, before ever showing the banner — the
+    // very first check(es) right at app boot have repeatedly found an "update" that a
+    // check run manually a bit later (by which point DevTools was opened and a command
+    // typed — several seconds minimum) always says doesn't exist. That timing signature
+    // points at something transient in the app's network stack right at cold start
+    // (e.g. DNS resolution not yet warmed up) rather than a real result, so only surface
+    // the banner once THREE checks, 5s apart, all agree — cheap here since it only
+    // delays the (rare) real-update case, never normal play.
+    for (let i = 0; update && i < 2; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
       update = await check();
     }
   } catch (err) {
