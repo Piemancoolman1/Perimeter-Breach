@@ -3,6 +3,7 @@ import { PointerLockControls } from "three/addons/controls/PointerLockControls.j
 import { buildWorld, MAPS, DEFAULT_MAP_ID, setHitboxesVisible } from "./game/world.js";
 import { Player, EYE_HEIGHT } from "./game/player.js";
 import { updateCorpseParts } from "./game/humanoidParts.js";
+import { RemotePlayer } from "./game/remotePlayer.js";
 import { Loadout } from "./game/loadout.js";
 import { GRENADE_DEF, WEAPON_DEFS, CLASSES } from "./game/weaponDefs.js";
 import { predictGrenadeArc } from "./game/projectiles.js";
@@ -180,6 +181,9 @@ const ctx = {
   obstacleMeshes: null,
   loadMap,
   showCollisionBoxes: false,
+  devSpectatorBody: null, // dev tool (F6) — a RemotePlayer standing in for "you", so you can fly around and look back at yourself
+  devSpectatorRotY: 0,
+  devSpectatorPitch: 0,
 
   enemies: [],
   pendingSpawns: [],
@@ -469,6 +473,39 @@ el.exitToMenuBtn.addEventListener("click", () => {
   }
 });
 
+// --- Dev tool (F6): step outside your own body ---------------------------------------------
+
+// The local player normally has no visible body at all (first person never renders one) —
+// this builds a real one (reusing RemotePlayer, the exact same body/weapon/Invisibility-fade
+// code a peer would see you with) frozen at wherever you toggled it on, then hands control to
+// the existing F5 noclip flight so you can fly around and actually look at yourself — e.g. to
+// check an ability's visual effect, which is otherwise something only a peer could ever see.
+// Pressing F6 again drops you back into first person exactly where the frozen body is standing.
+function toggleDevSpectator() {
+  if (ctx.devSpectatorBody) {
+    const body = ctx.devSpectatorBody;
+    camera.position.set(body.group.position.x, body.group.position.y + player.eyeHeight, body.group.position.z);
+    camera.rotation.set(0, ctx.devSpectatorRotY, 0);
+    body.destroy(scene);
+    ctx.devSpectatorBody = null;
+    player.setFlying(false);
+    el.spectatorIndicator.classList.add("hidden");
+  } else {
+    const x = camera.position.x;
+    const z = camera.position.z;
+    const y = camera.position.y - player.eyeHeight; // feet height, matching the position-tick convention
+    const rotY = getNetworkYaw();
+    const pitch = getNetworkPitch();
+    const body = new RemotePlayer(scene, "dev-spectator", "You", 0, x, z);
+    body.updateFromNetwork(x, y, z, rotY, player.health, false, loadout.current.def.id, pitch, ctx.invincibleTimer > 0, ctx.invisibleTimer > 0);
+    ctx.devSpectatorBody = body;
+    ctx.devSpectatorRotY = rotY;
+    ctx.devSpectatorPitch = pitch;
+    player.setFlying(true);
+    el.spectatorIndicator.classList.remove("hidden");
+  }
+}
+
 // --- Keyboard / mouse / touch input -------------------------------------------------------
 
 // True while the user is actually typing into a text field (room name, player name, password,
@@ -499,6 +536,11 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     player.setFlying(!player.flying);
     el.flyModeIndicator.classList.toggle("hidden", !player.flying);
+    return;
+  }
+  if (e.code === "F6") {
+    e.preventDefault();
+    toggleDevSpectator();
     return;
   }
   if (e.code === "Tab" && ctx.state === "playing" && ctx.inMatch) {
@@ -782,6 +824,26 @@ function animate() {
     for (const rp of ctx.remotePlayers.values()) {
       const revealedByPulse = ctx.abilities.activeReconMarkers.some((m) => m.targetGroup === rp.group);
       rp.update(dt, camera.position, camRight, revealedByPulse);
+    }
+
+    // Dev spectator (F6): position/rotation/pitch stay frozen at wherever it was toggled on
+    // (see toggleDevSpectator) — only health/weapon/Invisibility are kept live, so an ability
+    // pressed while flying around still visibly reacts on the body being watched.
+    if (ctx.devSpectatorBody) {
+      const body = ctx.devSpectatorBody;
+      body.updateFromNetwork(
+        body.targetPos.x,
+        body.targetPos.y,
+        body.targetPos.z,
+        ctx.devSpectatorRotY,
+        player.health,
+        false,
+        loadout.current.def.id,
+        ctx.devSpectatorPitch,
+        ctx.invincibleTimer > 0,
+        ctx.invisibleTimer > 0
+      );
+      body.update(dt, camera.position, camRight, false);
     }
 
     if (ctx.inMatch) {

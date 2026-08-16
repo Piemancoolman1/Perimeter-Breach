@@ -309,13 +309,14 @@ export function buildWeaponProp(s, weaponId = "pistol") {
 // health bar, or ragdoll bookkeeping; callers (Enemy, RemotePlayer) attach whichever of
 // those they need on top. `materialOverrides` lets a caller (e.g. a per-player color
 // tint, or Assassin's per-instance Invisibility fade) swap in its own material instances
-// instead of the shared defaults — skin/boot needed alongside clothing so a full-body
-// fade doesn't leave a floating head/hands/boots behind (eyes/mouth are left on the
-// shared material regardless; too small a detail to be worth their own per-instance copy).
+// instead of the shared defaults — every visible surface needs its own copy for a full-body
+// fade, or a leftover shared material leaves a floating detail (eyes, mouth) behind.
 export function buildHumanoidBody(s, materialOverrides = {}) {
   const clothingMat = materialOverrides.clothingMat || s.clothingMat;
   const skinMat = materialOverrides.skinMat || s.skinMat;
   const bootMat = materialOverrides.bootMat || s.bootMat;
+  const eyeMat = materialOverrides.eyeMat || s.eyeMat;
+  const mouthMat = materialOverrides.mouthMat || s.mouthMat;
 
   const group = new THREE.Group();
   const visual = new THREE.Group();
@@ -333,14 +334,14 @@ export function buildHumanoidBody(s, materialOverrides = {}) {
   head.castShadow = true;
   visual.add(head);
 
-  const eyeL = new THREE.Mesh(s.eyeGeo, s.eyeMat);
+  const eyeL = new THREE.Mesh(s.eyeGeo, eyeMat);
   eyeL.position.set(-0.085, 0.02, -0.175);
   head.add(eyeL);
-  const eyeR = new THREE.Mesh(s.eyeGeo, s.eyeMat);
+  const eyeR = new THREE.Mesh(s.eyeGeo, eyeMat);
   eyeR.position.set(0.085, 0.02, -0.175);
   head.add(eyeR);
 
-  const mouth = new THREE.Mesh(s.mouthGeo, s.mouthMat);
+  const mouth = new THREE.Mesh(s.mouthGeo, mouthMat);
   mouth.position.set(0, -0.09, -0.17);
   head.add(mouth);
 

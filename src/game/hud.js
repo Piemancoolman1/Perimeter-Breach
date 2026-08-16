@@ -35,6 +35,12 @@ export function createHud(ctx) {
     // which is a timed state): healing/respawning fades it back out automatically.
     const lowHealthT = Math.max(0, 1 - healthFrac / LOW_HEALTH_VIGNETTE_THRESHOLD);
     el.lowHealthVignette.style.opacity = (lowHealthT * LOW_HEALTH_VIGNETTE_MAX_OPACITY).toFixed(3);
+
+    // The only feedback the local player has that their own Invisibility is on/off at all —
+    // peers see it as a body fade, but first person never renders your own body to fade in
+    // the first place. CSS handles the actual 0.5s transition (see #invisible-vignette in
+    // style.css); this just toggles which end of it we're headed to.
+    el.invisibleVignette.classList.toggle("active", ctx.invisibleTimer > 0);
   }
 
   function showOverlay(title, message, isLose) {

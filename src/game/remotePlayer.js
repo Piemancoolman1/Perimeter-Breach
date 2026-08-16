@@ -14,6 +14,7 @@ import {
   WEAPON_FLASH_DURATION,
   WEAPON_IDS,
 } from "./humanoidParts.js";
+import { metalMat, lensMat, scopeLensMat } from "./weapon.js";
 
 // The gun arm stays raised into a ready stance permanently (never drops back to hanging at
 // the sides, per explicit request) — only a small sway layers on top while walking, and the
@@ -120,10 +121,16 @@ export class RemotePlayer {
     skinMat.transparent = true;
     const bootMat = s.bootMat.clone();
     bootMat.transparent = true;
-    const built = buildHumanoidBody(s, { clothingMat, skinMat, bootMat });
+    const eyeMat = s.eyeMat.clone();
+    eyeMat.transparent = true;
+    const mouthMat = s.mouthMat.clone();
+    mouthMat.transparent = true;
+    const built = buildHumanoidBody(s, { clothingMat, skinMat, bootMat, eyeMat, mouthMat });
     this.clothingMat = clothingMat;
     this.skinMat = skinMat;
     this.bootMat = bootMat;
+    this.eyeMat = eyeMat;
+    this.mouthMat = mouthMat;
     this.group = built.group;
     this.visual = built.visual;
     this.torso = built.torso;
@@ -137,10 +144,28 @@ export class RemotePlayer {
     // "explodes" a player the same way it explodes an AI enemy.
     this.parts = [this.torso, this.head, this.leftLeg, this.rightLeg, this.leftArm, this.rightArm];
 
+    // buildWeaponProp hard-codes the shared metalMat/lensMat/scopeLensMat from weapon.js on
+    // every gun/knife mesh it builds — swapped here for per-instance clones (same reasoning
+    // as clothing/skin/boot above) so fading THIS player doesn't fade every other player's
+    // (and every AI enemy's) held weapon along with it. Cheap to do for every weapon prop up
+    // front rather than only the currently-equipped one, since it's a one-time per-player cost.
+    this.weaponMetalMat = metalMat.clone();
+    this.weaponMetalMat.transparent = true;
+    this.weaponLensMat = lensMat.clone();
+    this.weaponLensMat.transparent = true;
+    this.weaponScopeLensMat = scopeLensMat.clone();
+    this.weaponScopeLensMat.transparent = true;
+
     this.weaponId = "pistol";
     this.weaponProps = {};
     for (const wid of WEAPON_IDS) {
       const prop = buildWeaponProp(s, wid);
+      prop.group.traverse((obj) => {
+        if (!obj.isMesh) return;
+        if (obj.material === metalMat) obj.material = this.weaponMetalMat;
+        else if (obj.material === lensMat) obj.material = this.weaponLensMat;
+        else if (obj.material === scopeLensMat) obj.material = this.weaponScopeLensMat;
+      });
       prop.group.visible = wid === this.weaponId;
       this.rightArm.add(prop.group);
       this.weaponProps[wid] = prop;
@@ -261,6 +286,11 @@ export class RemotePlayer {
     this.clothingMat.opacity += (targetOpacity - this.clothingMat.opacity) * opacityLerp;
     this.skinMat.opacity += (targetOpacity - this.skinMat.opacity) * opacityLerp;
     this.bootMat.opacity += (targetOpacity - this.bootMat.opacity) * opacityLerp;
+    this.eyeMat.opacity += (targetOpacity - this.eyeMat.opacity) * opacityLerp;
+    this.mouthMat.opacity += (targetOpacity - this.mouthMat.opacity) * opacityLerp;
+    this.weaponMetalMat.opacity += (targetOpacity - this.weaponMetalMat.opacity) * opacityLerp;
+    this.weaponLensMat.opacity += (targetOpacity - this.weaponLensMat.opacity) * opacityLerp;
+    this.weaponScopeLensMat.opacity += (targetOpacity - this.weaponScopeLensMat.opacity) * opacityLerp;
 
     updateHealthBarSprite(this.healthBarFg, this.healthBarFgMat, this.health / this.maxHealth, cameraRight);
     if (cameraPos) {
@@ -309,12 +339,22 @@ export class RemotePlayer {
     this.clothingMat.opacity = 1;
     this.skinMat.opacity = 1;
     this.bootMat.opacity = 1;
+    this.eyeMat.opacity = 1;
+    this.mouthMat.opacity = 1;
+    this.weaponMetalMat.opacity = 1; // the weapon stays attached to whichever arm it's on through the explosion
+    this.weaponLensMat.opacity = 1;
+    this.weaponScopeLensMat.opacity = 1;
     const parts = breakApartHumanoid(scene, this.group, this.parts, blast);
     this.nameTagMat.dispose();
     this.nameTagTexture.dispose();
     this.invincibleGlowMat.dispose(); // per-instance material (opacity mutated independently per player) — the geometry itself is shared, so only this needs disposing
     this.skinMat.dispose();
     this.bootMat.dispose();
+    this.eyeMat.dispose();
+    this.mouthMat.dispose();
+    this.weaponMetalMat.dispose();
+    this.weaponLensMat.dispose();
+    this.weaponScopeLensMat.dispose();
     return parts;
   }
 
@@ -325,5 +365,10 @@ export class RemotePlayer {
     this.invincibleGlowMat.dispose();
     this.skinMat.dispose();
     this.bootMat.dispose();
+    this.eyeMat.dispose();
+    this.mouthMat.dispose();
+    this.weaponMetalMat.dispose();
+    this.weaponLensMat.dispose();
+    this.weaponScopeLensMat.dispose();
   }
 }
