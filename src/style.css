@@ -789,11 +789,19 @@ button:active {
   position: fixed;
   left: 10px;
   bottom: 8px;
-  color: rgba(232, 246, 255, 0.4);
-  font-size: 11px;
+  color: var(--accent);
+  background: rgba(4, 10, 14, 0.75);
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 13px;
+  font-weight: 600;
   letter-spacing: 0.02em;
   pointer-events: none;
-  z-index: 5;
+  /* .overlay (menus/landing) is z-index 10 with a near-opaque full-screen background —
+     this needs to sit above every overlay, not just the bare canvas, or it's invisible
+     any time a menu is open (which is most of the time). */
+  z-index: 50;
 }
 
 .update-banner {
