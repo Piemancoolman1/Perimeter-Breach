@@ -29,6 +29,15 @@ export async function checkForUpdate() {
   try {
     const { check } = await import("@tauri-apps/plugin-updater");
     update = await check();
+    if (update) {
+      // Confirm with a second check a couple seconds later before ever showing the
+      // banner — the very first check right at app boot has intermittently found an
+      // "update" that a check moments later says doesn't exist (looks like GitHub's CDN
+      // briefly serving a stale manifest right at that instant). Only surfacing the
+      // banner once two checks agree avoids flashing it incorrectly in that window.
+      await new Promise((r) => setTimeout(r, 2000));
+      update = await check();
+    }
   } catch (err) {
     console.warn("Update check failed", err);
     return;
@@ -40,6 +49,31 @@ export async function checkForUpdate() {
 
   el.updateInstallBtn.addEventListener("click", async () => {
     el.updateInstallBtn.disabled = true;
+    el.updateInstallBtn.textContent = "Checking...";
+
+    // Re-verify right before actually doing anything, rather than trusting the result
+    // from whenever the page first loaded — the startup check has intermittently found
+    // an "update" that a check moments later says doesn't exist (looks like GitHub's
+    // CDN briefly serving a stale manifest right at boot). Worst case with this guard is
+    // a banner that quietly clears itself on click instead of attempting a pointless (or
+    // actively wrong) download.
+    let fresh;
+    try {
+      const { check } = await import("@tauri-apps/plugin-updater");
+      fresh = await check();
+    } catch (err) {
+      console.warn("Update re-check failed", err);
+      el.updateInstallBtn.disabled = false;
+      el.updateInstallBtn.textContent = "Update & Restart";
+      el.updateBannerText.textContent = `Update check failed: ${err?.message ?? err}`;
+      return;
+    }
+    if (!fresh) {
+      el.updateBanner.classList.add("hidden");
+      return;
+    }
+    update = fresh;
+
     el.updateInstallBtn.textContent = "Downloading...";
     try {
       let downloaded = 0;
