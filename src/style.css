@@ -817,6 +817,13 @@ button:active {
   font-size: 13px;
   text-align: left;
 }
+/* .hidden alone loses to .update-banner's own `display: flex` (equal specificity, later
+   source order wins) -- this component-specific override is what actually hides it,
+   same pattern as .overlay.hidden elsewhere in this file. Without this, the banner was
+   visible unconditionally regardless of the "hidden" class ever being applied. */
+.update-banner.hidden {
+  display: none;
+}
 .update-banner span {
   color: #e8f6ff;
 }

@@ -29,18 +29,6 @@ export async function checkForUpdate() {
   try {
     const { check } = await import("@tauri-apps/plugin-updater");
     update = await check();
-    // Confirm with more checks, spaced well apart, before ever showing the banner — the
-    // very first check(es) right at app boot have repeatedly found an "update" that a
-    // check run manually a bit later (by which point DevTools was opened and a command
-    // typed — several seconds minimum) always says doesn't exist. That timing signature
-    // points at something transient in the app's network stack right at cold start
-    // (e.g. DNS resolution not yet warmed up) rather than a real result, so only surface
-    // the banner once THREE checks, 5s apart, all agree — cheap here since it only
-    // delays the (rare) real-update case, never normal play.
-    for (let i = 0; update && i < 2; i++) {
-      await new Promise((r) => setTimeout(r, 5000));
-      update = await check();
-    }
   } catch (err) {
     console.warn("Update check failed", err);
     return;
@@ -54,12 +42,9 @@ export async function checkForUpdate() {
     el.updateInstallBtn.disabled = true;
     el.updateInstallBtn.textContent = "Checking...";
 
-    // Re-verify right before actually doing anything, rather than trusting the result
-    // from whenever the page first loaded — the startup check has intermittently found
-    // an "update" that a check moments later says doesn't exist (looks like GitHub's
-    // CDN briefly serving a stale manifest right at boot). Worst case with this guard is
-    // a banner that quietly clears itself on click instead of attempting a pointless (or
-    // actively wrong) download.
+    // Re-verify right before actually doing anything, rather than trusting a result from
+    // whenever the page first loaded (which could be a while ago if someone leaves the
+    // landing screen open) — cheap insurance against acting on stale info.
     let fresh;
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
