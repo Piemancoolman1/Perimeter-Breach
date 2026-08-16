@@ -25,16 +25,35 @@ export async function checkForUpdate() {
 
   el.updateInstallBtn.addEventListener("click", async () => {
     el.updateInstallBtn.disabled = true;
-    el.updateInstallBtn.textContent = "Installing...";
+    el.updateInstallBtn.textContent = "Downloading...";
     try {
-      await update.downloadAndInstall();
+      let downloaded = 0;
+      let total = 0;
+      await update.downloadAndInstall((ev) => {
+        switch (ev.event) {
+          case "Started":
+            total = ev.data.contentLength ?? 0;
+            break;
+          case "Progress":
+            downloaded += ev.data.chunkLength;
+            el.updateInstallBtn.textContent = total
+              ? `Downloading... ${Math.round((downloaded / total) * 100)}%`
+              : `Downloading... ${(downloaded / 1e6).toFixed(1)}MB`;
+            break;
+          case "Finished":
+            el.updateInstallBtn.textContent = "Installing...";
+            break;
+        }
+      });
       const { relaunch } = await import("@tauri-apps/plugin-process");
       await relaunch();
     } catch (err) {
+      // Shown directly in the banner, not just console.warn'd — a release build has no
+      // devtools open by default, so a user hitting this has no other way to see why.
       console.warn("Update install failed", err);
       el.updateInstallBtn.disabled = false;
       el.updateInstallBtn.textContent = "Update & Restart";
-      el.updateBannerText.textContent = "Update failed — try again later.";
+      el.updateBannerText.textContent = `Update failed: ${err?.message ?? err}`;
     }
   });
 }
