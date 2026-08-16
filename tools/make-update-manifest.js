@@ -28,9 +28,15 @@ if (!existsSync(NSIS_DIR)) {
   process.exit(1);
 }
 
-const installerName = readdirSync(NSIS_DIR).find((f) => f.endsWith(".exe") && !f.endsWith(".exe.sig"));
+// Old builds' installers are never cleaned out of this folder — matching on the current
+// version too (not just ".exe") is required, or this silently picks up a stale build.
+// `_<version>_` (not a bare substring match) so e.g. version 0.1.1 can't accidentally
+// match a 0.1.10 file.
+const installerName = readdirSync(NSIS_DIR).find(
+  (f) => f.endsWith(".exe") && !f.endsWith(".exe.sig") && f.includes(`_${version}_`)
+);
 if (!installerName) {
-  console.error(`No installer .exe found in ${NSIS_DIR}.`);
+  console.error(`No installer .exe for version ${version} found in ${NSIS_DIR} — run "npm run tauri build" first.`);
   process.exit(1);
 }
 
