@@ -123,9 +123,9 @@ export function sharedHumanoidParts() {
     bazookaHandguardGeo: new THREE.BoxGeometry(0.05, 0.2, 0.05),
     bazookaSightPostGeo: new THREE.BoxGeometry(0.014, 0.014, 0.05),
     bazookaSightRingGeo: new THREE.TorusGeometry(0.028, 0.005, 8, 16),
-    knifeHandleGeo: new THREE.BoxGeometry(0.035, 0.14, 0.035),
-    knifeGuardGeo: new THREE.BoxGeometry(0.09, 0.02, 0.02),
-    knifeBladeGeo: new THREE.BoxGeometry(0.016, 0.26, 0.006),
+    knifeHandleGeo: new THREE.BoxGeometry(0.03, 0.1, 0.03),
+    knifeGuardGeo: new THREE.BoxGeometry(0.07, 0.02, 0.015),
+    knifeBladeGeo: new THREE.BoxGeometry(0.014, 0.12, 0.005),
     skinMat,
     clothingMat,
     bootMat,
@@ -251,15 +251,15 @@ export function buildWeaponProp(s, weaponId = "pistol") {
     muzzle = { x: 0, y: -0.48, z: 0 };
   } else if (weaponId === "knife") {
     const handle = new THREE.Mesh(s.knifeHandleGeo, metalMat);
-    handle.position.set(0, 0.09, 0);
+    handle.position.set(0, 0.07, 0);
     group.add(handle);
     const guard = new THREE.Mesh(s.knifeGuardGeo, metalMat);
-    guard.position.set(0, 0.02, 0);
+    guard.position.set(0, 0.015, 0);
     group.add(guard);
     const blade = new THREE.Mesh(s.knifeBladeGeo, metalMat);
-    blade.position.set(0, -0.15, 0);
+    blade.position.set(0, -0.05, 0);
     group.add(blade);
-    muzzle = { x: 0, y: -0.28, z: 0 };
+    muzzle = { x: 0, y: -0.11, z: 0 };
   } else {
     group.add(new THREE.Mesh(s.gunBodyGeo, metalMat));
     const barrel = new THREE.Mesh(s.gunBarrelGeo, metalMat);

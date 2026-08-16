@@ -287,22 +287,28 @@ function buildBazookaMesh() {
 function buildKnifeMesh() {
   const group = new THREE.Group();
 
-  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.14), metalMat);
-  handle.position.set(0, 0, 0.09);
+  // Each part's near edge deliberately overlaps the next by ~0.005 (this project's own
+  // "overlap slightly at joints" convention for parts meant to read as one solid object) —
+  // the previous version left a real gap between blade and guard, and was also sized as if
+  // viewed from arm's length rather than the ~0.3-unit distance every weapon viewmodel is
+  // actually held from the camera at, which is what made it read as a huge diagonal beam
+  // instead of a compact dagger.
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.1), metalMat);
+  handle.position.set(0, 0, 0.07); // spans z=[0.02, 0.12]
   group.add(handle);
 
-  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.02, 0.02), metalMat);
-  guard.position.set(0, 0, 0.02);
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.015, 0.02), metalMat);
+  guard.position.set(0, 0, 0.015); // spans z=[0.005, 0.025] — overlaps handle by 0.005
   group.add(guard);
 
   // A single flattened box for the whole blade (no separate tapered tip) — keeps this
   // in the same box-primitive language as the rest of the low-poly art, and avoids the
   // FP/TP axis-conversion ambiguity a rotated cone would add for one small detail.
-  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.006, 0.26), metalMat);
-  blade.position.set(0, 0, -0.15);
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.005, 0.12), metalMat);
+  blade.position.set(0, 0, -0.05); // spans z=[-0.11, 0.01] — overlaps guard by 0.005
   group.add(blade);
 
-  const fx = buildMuzzleFlashParts(new THREE.Vector3(0, 0, -0.28));
+  const fx = buildMuzzleFlashParts(new THREE.Vector3(0, 0, -0.11));
   group.add(fx.muzzleTip, fx.flash, fx.flashLight);
 
   return {
@@ -311,9 +317,9 @@ function buildKnifeMesh() {
     flash: fx.flash,
     flashMat: fx.flashMat,
     flashLight: fx.flashLight,
-    sightLocal: new THREE.Vector3(0, 0, -0.24),
-    restPos: new THREE.Vector3(0.2, -0.22, -0.3),
-    restRot: new THREE.Euler(0.1, -0.3, 0.15),
+    sightLocal: new THREE.Vector3(0, 0, -0.11),
+    restPos: new THREE.Vector3(0.24, -0.24, -0.5),
+    restRot: new THREE.Euler(0.05, -0.2, 0.05),
   };
 }
 

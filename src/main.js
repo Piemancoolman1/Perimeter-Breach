@@ -846,6 +846,13 @@ function animate() {
       body.update(dt, camera.position, camRight, false);
     }
 
+    // Ungated by ctx.inMatch (unlike respawnTimer/invincibleTimer below, which only ever
+    // matter in multiplayer's respawn loop — single-player death goes straight to endGame()) —
+    // Invisibility is usable in single-player too, so its countdown must run in both modes.
+    // The HUD vignette (hud.js) is the local player's only feedback that it's on/off; peers
+    // see it as a body fade via the `invisible` position-tick field below, once this hits 0.
+    if (ctx.invisibleTimer > 0) ctx.invisibleTimer -= dt;
+
     if (ctx.inMatch) {
       if (ctx.respawnTimer > 0) {
         ctx.respawnTimer -= dt;
@@ -862,10 +869,6 @@ function animate() {
           if (ctx.invincibleTimer <= 0) ctx.matchLifecycle.clearInvincible();
           else el.invincibleTimerEl.textContent = `${Math.ceil(ctx.invincibleTimer)}s`;
         }
-        // No local HUD/vignette tied to this (unlike invincibleTimer) — invisibility is
-        // purely something peers see (via the `invisible` position-tick field below fading
-        // to false once this hits 0), so a plain decrement is all that's needed here.
-        if (ctx.invisibleTimer > 0) ctx.invisibleTimer -= dt;
         ctx.posBroadcastAccum += dt;
         if (ctx.posBroadcastAccum >= POS_TICK_INTERVAL && ctx.lobby) {
           ctx.posBroadcastAccum = 0;
