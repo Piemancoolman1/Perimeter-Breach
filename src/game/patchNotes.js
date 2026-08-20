@@ -7,6 +7,21 @@
 // permanent, growing history, not just "whatever's newest."
 export const PATCH_NOTES = [
   {
+    version: "0.1.17",
+    date: "2026-08-20",
+    highlights: [
+      "New: single-player enemies now steer around obstacles instead of walking straight into a wall when you're behind one",
+      "New: enemies duck behind cover and peek out to fire when badly hurt, instead of always fighting you in the open",
+      "New: three enemy types now appear as your kill count climbs — the original all-rounder gunner, a fast close-range rusher, and a long-range sniper",
+      "New: enemies lead their shots based on your movement, and strafing actually makes you harder to hit now",
+      "New: enemies remember where they last saw you and search that spot for a few seconds instead of losing track of you the instant you break line of sight",
+      "New: multiple enemies engaging you at once now spread out instead of clustering on the same angle",
+      "New: enemies wander near their spawn point instead of standing completely frozen until you're close enough to aggro them",
+      "Balance: more enemies can be alive at once, and tougher enemy types unlock, as your single-player kill count climbs",
+      "Fixed: enemies always played the pistol firing sound regardless of which weapon they were actually holding",
+    ],
+  },
+  {
     version: "0.1.16",
     date: "2026-08-16",
     highlights: [

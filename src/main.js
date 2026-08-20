@@ -23,11 +23,11 @@ import { createScreenManager } from "./game/screens.js";
 import { createAbilities } from "./game/abilities.js";
 import { createCombat } from "./game/combat.js";
 import { createMatchLifecycle } from "./game/matchLifecycle.js";
+import { currentDifficultyTier } from "./game/enemyAI.js";
 import { checkForUpdate, showAppVersion, setupQuitGame } from "./game/updater.js";
 import "./style.css";
 
 const TOTAL_KILLS_TO_WIN = 20;
-const MAX_ENEMIES = 5;
 const ENEMY_RESPAWN_DELAY = 4.5;
 const BASE_FOV = 75;
 const INFINITE_GRENADES = true; // testing — flip off for normal supply-limited play
@@ -923,8 +923,8 @@ function animate() {
     // endGame()) during a "multiplayer" match.
     if (!ctx.inMatch) {
       for (const e of ctx.enemies) {
-        const damage = e.update(dt, elapsed, camera.position, ctx.obstacles, ctx.obstacleMeshes, camRight, ctx.invisibleUntil <= Date.now());
-        if (e.justFired) sounds.play("fire_pistol", { volume: 0.35, rate: 0.9 + Math.random() * 0.15 });
+        const damage = e.update(dt, elapsed, camera.position, ctx.obstacles, ctx.obstacleMeshes, camRight, ctx.invisibleUntil <= Date.now(), player.velocity, ctx.enemies);
+        if (e.justFired) sounds.play(e.fireSoundId, { volume: 0.35, rate: 0.9 + Math.random() * 0.15 });
         if (damage) {
           player.takeDamage(damage);
           ctx.vfx.flashHit();
@@ -1010,7 +1010,8 @@ function animate() {
         ctx.pendingSpawns[i] -= dt;
         if (ctx.pendingSpawns[i] <= 0) {
           ctx.pendingSpawns.splice(i, 1);
-          if (ctx.enemies.length < MAX_ENEMIES && ctx.state === "playing") ctx.matchLifecycle.spawnEnemy();
+          const maxEnemies = currentDifficultyTier(ctx.kills).maxEnemies;
+          if (ctx.enemies.length < maxEnemies && ctx.state === "playing") ctx.matchLifecycle.spawnEnemy();
         }
       }
     }

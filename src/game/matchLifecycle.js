@@ -10,6 +10,7 @@ import { DEFAULT_MAP_ID } from "./world.js";
 import { formatGrenadeCount } from "./hud.js";
 import { MINE_BLAST_RADIUS } from "./abilities.js";
 import { RESPAWN_DELAY, INVINCIBLE_DURATION, ABILITY_DURATIONS } from "../../shared/abilityConstants.js";
+import { pickWeightedArchetype, currentDifficultyTier } from "./enemyAI.js";
 
 // Single-player reset/respawn, the whole multiplayer match lifecycle (start/spawn/damage/
 // respawn/elim/end/disconnect), and the network relay handler that ties incoming peer
@@ -21,7 +22,8 @@ import { RESPAWN_DELAY, INVINCIBLE_DURATION, ABILITY_DURATIONS } from "../../sha
 export function createMatchLifecycle(ctx) {
   function spawnEnemy() {
     const { x, z } = randomSpawnPoint(14);
-    ctx.enemies.push(new Enemy(ctx.scene, x, z));
+    const archetypeId = pickWeightedArchetype(currentDifficultyTier(ctx.kills).pool);
+    ctx.enemies.push(new Enemy(ctx.scene, x, z, archetypeId));
   }
 
   // Shared by single-player reset and multiplayer match start/respawn — everything about
@@ -137,7 +139,11 @@ export function createMatchLifecycle(ctx) {
       ctx.kills = 0;
       el.kills.textContent = `0 / ${ctx.TOTAL_KILLS_TO_WIN}`;
       resetPlayerState(0, 8);
-      for (let i = 0; i < 3; i++) spawnEnemy();
+      // Tier 0's maxEnemies is the same original single-player starting count — reads from
+      // DIFFICULTY_TIERS instead of a separate hardcoded "3" so it can never drift out of sync
+      // with the respawn cap's own tiering (see MAX_ENEMIES' usage in main.js).
+      const startingCount = currentDifficultyTier(0).maxEnemies;
+      for (let i = 0; i < startingCount; i++) spawnEnemy();
     }
   }
 
