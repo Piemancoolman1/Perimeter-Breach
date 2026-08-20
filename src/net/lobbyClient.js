@@ -1,3 +1,5 @@
+import { APP_VERSION } from "../game/version.js";
+
 const DEFAULT_URL = "ws://localhost:8787";
 
 // Thin wrapper around the browser's native WebSocket — plain callback fields the caller
@@ -15,7 +17,13 @@ export class LobbyClient {
     this.onError = null;
     this.onDisconnected = null;
     this.onMatchStarted = null;
+    this.onMatchEnded = null;
     this.onRelay = null;
+    this.onAbilityUsed = null;
+    this.onRespawnScheduled = null;
+    this.onPlayerSpawned = null;
+    this.onFireConfirmed = null;
+    this.onDamageApplied = null;
   }
 
   connect() {
@@ -71,8 +79,26 @@ export class LobbyClient {
       case "match_started":
         if (this.onMatchStarted) this.onMatchStarted(msg.config, msg.startedAt);
         break;
+      case "match_ended":
+        if (this.onMatchEnded) this.onMatchEnded(msg.winnerId);
+        break;
       case "relay":
         if (this.onRelay) this.onRelay(msg.from, msg.payload);
+        break;
+      case "ability_used":
+        if (this.onAbilityUsed) this.onAbilityUsed(msg.from, msg.abilityId, msg);
+        break;
+      case "respawn_scheduled":
+        if (this.onRespawnScheduled) this.onRespawnScheduled(msg);
+        break;
+      case "player_spawned":
+        if (this.onPlayerSpawned) this.onPlayerSpawned(msg.playerId, msg.maxHealth);
+        break;
+      case "fire_confirmed":
+        if (this.onFireConfirmed) this.onFireConfirmed(msg.from, msg);
+        break;
+      case "damage_applied":
+        if (this.onDamageApplied) this.onDamageApplied(msg);
         break;
     }
   }
@@ -85,12 +111,18 @@ export class LobbyClient {
     this._send({ type: "list_rooms" });
   }
 
-  createRoom({ name, isPublic, password, playerName }) {
-    this._send({ type: "create_room", name, isPublic, password, playerName });
+  // `token` (an AccountClient session token, or undefined for a guest) lets the server resolve a
+  // real account id for this player — see server/auth.js's resolveUserId(). Optional and
+  // harmless to omit; a guest plays exactly as before, just untagged for stats.
+  createRoom({ name, isPublic, password, playerName, token }) {
+    // Whoever creates a room sets that room's version — every later join_room is checked
+    // against it (see server/index.js), so two peers on different builds can't end up in the
+    // same match with mismatched game logic/network payload shapes.
+    this._send({ type: "create_room", name, isPublic, password, playerName, version: APP_VERSION, token });
   }
 
-  joinRoom({ roomId, password, playerName }) {
-    this._send({ type: "join_room", roomId, password, playerName });
+  joinRoom({ roomId, password, playerName, token }) {
+    this._send({ type: "join_room", roomId, password, playerName, version: APP_VERSION, token });
   }
 
   leaveRoom() {
@@ -101,14 +133,47 @@ export class LobbyClient {
     this._send({ type: "start_match", config });
   }
 
-  // Broadcast to everyone else currently in the room (position ticks, kill-feed events).
+  // Broadcast to everyone else currently in the room (position ticks, left_match, mine_explode).
   relayToRoom(payload) {
     this._send({ type: "relay_to_room", payload });
   }
 
-  // Sent to exactly one other player in the room (hit/damage messages).
-  relayToPlayer(targetId, payload) {
-    this._send({ type: "relay_to_player", targetId, payload });
+  // Shield Wall / Proximity Mine / Invisibility (and now Overclock, for its server-side fire-rate
+  // window — see abilities.js) — unlike relayToRoom, this is validated and timed server-side (see
+  // server/index.js's handleUseAbility); every recipient (including this client, via the
+  // ability_used echo) treats the server's response as the authoritative activation.
+  useAbility({ abilityId, id, x, z, rotY }) {
+    this._send({ type: "use_ability", abilityId, id, x, z, rotY });
+  }
+
+  // (Re)registers this player's server-side combat ledger for a fresh spawn/respawn/class change
+  // — see server/index.js's handleSpawnReady. Sent from matchLifecycle.js's spawnIntoMatch().
+  spawnReady(classId) {
+    this._send({ type: "spawn_ready", classId });
+  }
+
+  // Ammo/fire-rate authority — replaces the old bare relayToRoom({t:"fire"}) for a real weapon
+  // shot (see server/index.js's handleReportFire). `hitPoint`/`hitPlayer` are still the shooter's
+  // own local raycast result (hit *detection* stays client-side); the server only gates whether
+  // this shot was allowed to happen at all.
+  reportFire({ weaponId, hitPoint, hitPlayer }) {
+    this._send({ type: "report_fire", weaponId, hitPoint, hitPlayer });
+  }
+
+  reportReload(weaponId) {
+    this._send({ type: "report_reload", weaponId });
+  }
+
+  reportGrenadeThrow() {
+    this._send({ type: "report_grenade_throw" });
+  }
+
+  // Health/damage authority — replaces the old relayToPlayer({t:"hit"}) the victim used to
+  // trust and apply to itself (see server/index.js's handleReportHit). `damage` only matters for
+  // a splash weapon (server clamps it to that weapon's real max); a hitscan weapon's exact damage
+  // is computed server-side from `weaponId` alone and this field is ignored.
+  reportHit({ targetId, weaponId, damage, blast }) {
+    this._send({ type: "report_hit", targetId, weaponId, damage, blast });
   }
 
   disconnect() {

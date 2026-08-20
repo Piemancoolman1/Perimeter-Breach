@@ -1,12 +1,11 @@
 import * as THREE from "three";
 import { resolveCollisions, getGroundHeight, ARENA_BOUND } from "./world.js";
+import { WALK_SPEED, SPRINT_MULT, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE } from "../../shared/movementConstants.js";
 
 export const EYE_HEIGHT = 1.7;
 const EYE_HEIGHT_CROUCH = 1.0;
 const CROUCH_TRANSITION_RATE = 10; // per-second lerp rate between standing/crouched eye height
 const RADIUS = 0.45;
-const WALK_SPEED = 6.5;
-const SPRINT_MULT = 1.6;
 const CROUCH_SPEED_MULT = 0.5;
 const ACCEL = 40;
 const DAMPING = 10;
@@ -24,6 +23,14 @@ const STAMINA_REGEN_RATE = 16; // per second whenever not draining
 // fractions of a point each frame while still held.
 const STAMINA_LOCK_RECOVER_THRESHOLD = 25;
 
+// Passive health regen: any damage resets the "time since last hit" clock, and once it's been
+// clear of damage for HEALTH_REGEN_DELAY seconds, health trickles back up at HEALTH_REGEN_RATE
+// per second until it hits the current class's max — same drain/regen-timer shape as stamina
+// above, just gated by a delay instead of an instant on/off. In a multiplayer match this is
+// purely a local, responsive display — server/index.js's handleReportHit recomputes the same
+// formula server-side (lazily, off elapsed wall-clock time) as the actual source of truth, so
+// this never has a chance to drift from what a hit's damage_applied broadcast will show.
+
 export class Player {
   constructor(camera) {
     this.camera = camera;
@@ -40,6 +47,7 @@ export class Player {
     this.staminaMult = 1;
     this.maxHealth = 100;
     this.health = this.maxHealth;
+    this.timeSinceDamage = Infinity; // already "long enough ago" — a fresh spawn has nothing to regen anyway
 
     this.camera.position.set(0, EYE_HEIGHT, 8);
   }
@@ -62,6 +70,17 @@ export class Player {
 
   takeDamage(amount) {
     this.health = Math.max(0, this.health - amount);
+    this.timeSinceDamage = 0;
+  }
+
+  // Ticks the regen delay/heal every frame regardless of movement mode (flying, grounded,
+  // mid-jump — all the same to a health bar), so this is called unconditionally at the top of
+  // update() rather than folded into the grounded-only movement logic below it.
+  regenHealth(dt) {
+    this.timeSinceDamage += dt;
+    if (this.timeSinceDamage >= HEALTH_REGEN_DELAY && this.health < this.maxHealth) {
+      this.health = Math.min(this.maxHealth, this.health + HEALTH_REGEN_RATE * dt);
+    }
   }
 
   setFlying(flying) {
@@ -70,19 +89,9 @@ export class Player {
     this.onGround = false; // stops footstep sfx from playing while airborne-flying; recomputed correctly the instant flying turns back off
   }
 
-  // Scout's ability: an instant horizontal speed burst in the given (world-space, normalized
-  // internally) direction. Directly *sets* horizontal velocity rather than adding to it, so
-  // the dash always feels like the same-strength burst regardless of current speed — the
-  // normal ACCEL-based damping in update() then gradually reins it back in to WALK_SPEED just
-  // like any other movement, no separate dash-decay logic needed.
-  dash(dirX, dirZ, speed) {
-    const len = Math.hypot(dirX, dirZ);
-    if (len < 0.0001) return;
-    this.velocity.x = (dirX / len) * speed;
-    this.velocity.z = (dirZ / len) * speed;
-  }
-
   update(dt, input, obstacles, arenaBound = ARENA_BOUND, ceilingHeight = Infinity) {
+    this.regenHealth(dt);
+
     if (this.flying) {
       this.updateFlying(dt, input);
       return;
@@ -121,9 +130,7 @@ export class Player {
     // effect (imperceptible in practice at 1 frame, but just as easy to get exactly right).
     // Only actually drains while genuinely sprinting — holding Shift while standing still (or
     // while crouched, where it can't apply anyway) costs nothing, matching how "sprint" only
-    // ever meant something while actually covering ground. This is *why Dash exists at all*
-    // now: sprint is a limited resource, so a burst of speed you can call on demand (its own
-    // separate cooldown, not stamina) actually adds something sprint alone can't always cover.
+    // ever meant something while actually covering ground.
     if (wantsSprint && !this.staminaLocked && isMoving) {
       this.stamina = Math.max(0, this.stamina - STAMINA_DRAIN_RATE * dt);
       if (this.stamina <= 0) this.staminaLocked = true;

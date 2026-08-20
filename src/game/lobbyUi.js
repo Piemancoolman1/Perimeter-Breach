@@ -34,12 +34,14 @@ function clearMpError(errorEl) {
 // read by other modules (matchLifecycle, combat, hud) — always through `ctx`, never a local
 // binding, so every module sees the same up-to-date values.
 export function createLobbyUi(ctx) {
-  const mpScreens = [el.landing, el.multiplayerScreen, el.createRoomScreen, el.browseRoomsScreen, el.roomScreen];
   let activeErrorEl = el.mpConnectError;
   let creatingPublic = true;
 
+  // Thin domain-named alias over the shared screen manager (ctx.screens.showScreen) — kept so
+  // every multiplayer-flow call site below still reads as "show this lobby screen" rather than
+  // the more generic name, without maintaining its own separate hide/show logic.
   function showMpScreen(target) {
-    for (const s of mpScreens) s.classList.toggle("hidden", s !== target);
+    ctx.screens.showScreen(target);
   }
 
   function getPlayerNameOrError(errorEl) {
@@ -98,7 +100,7 @@ export function createLobbyUi(ctx) {
   function attemptJoinRoom(roomId, password) {
     activeErrorEl = el.browseError;
     clearMpError(el.browseError);
-    ctx.lobby.joinRoom({ roomId, password, playerName: loadPlayerName() });
+    ctx.lobby.joinRoom({ roomId, password, playerName: loadPlayerName(), token: ctx.accountClient.token });
   }
 
   function selectRoom(room) {
@@ -168,6 +170,7 @@ export function createLobbyUi(ctx) {
         rp.destroy(ctx.scene);
         ctx.remotePlayers.delete(id);
       }
+      ctx.remoteEffectUntil.delete(id);
     };
     client.onHostChanged = (id) => {
       ctx.currentPlayers = ctx.currentPlayers.map((p) => ({ ...p, isHost: p.id === id }));
@@ -187,8 +190,16 @@ export function createLobbyUi(ctx) {
         setMpError(el.mpConnectError, "Disconnected from the multiplayer server.");
       }
     };
-    client.onMatchStarted = (config, startedAt) => ctx.matchLifecycle.beginMatch(config, startedAt);
+    client.onMatchStarted = (config) => ctx.matchLifecycle.startSession({ mode: "multiplayer", config });
+    // The server is now the sole authority on when a match ends and who won (see server/index.js's
+    // finalizeMatch) — no client-local kill-target/time-limit check triggers this anymore.
+    client.onMatchEnded = (winnerId) => ctx.matchLifecycle.endMatch(winnerId);
     client.onRelay = (from, payload) => ctx.matchLifecycle.handleRelay(from, payload);
+    client.onAbilityUsed = (from, abilityId, payload) => ctx.matchLifecycle.handleAbilityUsed(from, abilityId, payload);
+    client.onRespawnScheduled = (msg) => ctx.matchLifecycle.handleRespawnScheduled(msg);
+    client.onFireConfirmed = (from, payload) => ctx.matchLifecycle.handleFireConfirmed(from, payload);
+    client.onPlayerSpawned = (playerId, maxHealth) => ctx.matchLifecycle.handlePlayerSpawned(playerId, maxHealth);
+    client.onDamageApplied = (payload) => ctx.matchLifecycle.handleDamageApplied(payload);
   }
 
   async function ensureLobbyConnected() {
@@ -205,7 +216,10 @@ export function createLobbyUi(ctx) {
   }
 
   el.multiplayerBtn.addEventListener("click", () => {
-    el.playerNameInput.value = loadPlayerName();
+    // A signed-in account's display name is the sensible default (it's also what actually gets
+    // tracked for stats, via the token sent below — this field itself is still just the freeform
+    // in-lobby display name and can be edited either way, signed in or not).
+    el.playerNameInput.value = ctx.accountClient.name || loadPlayerName();
     clearMpError(el.mpConnectError);
     showMpScreen(el.multiplayerScreen);
   });
@@ -261,6 +275,7 @@ export function createLobbyUi(ctx) {
       isPublic: creatingPublic,
       password: el.roomPasswordCreateInput.value,
       playerName: loadPlayerName(),
+      token: ctx.accountClient.token,
     });
   });
 

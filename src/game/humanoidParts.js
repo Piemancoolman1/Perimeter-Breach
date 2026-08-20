@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { metalMat, lensMat, scopeLensMat } from "./weapon.js";
 
 // Shared low-poly humanoid builder — geometry/materials/body assembly used by both AI
@@ -109,6 +110,18 @@ export function sharedHumanoidParts() {
     akMagGeo: new THREE.BoxGeometry(0.07, 0.09, 0.26),
     akSightPostGeo: new THREE.BoxGeometry(0.012, 0.012, 0.045),
     akSightRingGeo: new THREE.TorusGeometry(0.032, 0.006, 8, 16),
+    // "ak*" above is now Scout's SMG (see buildWeaponProp's "smg" branch and weaponDefs.js) —
+    // left named as-is rather than renamed wholesale, since it's the exact same model/geometry,
+    // just reassigned to a different class. Assault's actual new weapon is the rifle* set below.
+    rifleBodyGeo: new THREE.BoxGeometry(0.115, 0.44, 0.125),
+    rifleRailGeo: new THREE.BoxGeometry(0.02, 0.34, 0.015),
+    rifleBarrelGeo: new THREE.CylinderGeometry(0.022, 0.026, 0.3, 10),
+    rifleBarrelTipGeo: new THREE.CylinderGeometry(0.03, 0.03, 0.035, 10),
+    rifleForegripGeo: new THREE.BoxGeometry(0.05, 0.06, 0.16),
+    rifleGripGeo: new THREE.BoxGeometry(0.09, 0.1, 0.21),
+    rifleMagGeo: new THREE.BoxGeometry(0.06, 0.08, 0.22),
+    rifleSightBaseGeo: new THREE.BoxGeometry(0.03, 0.05, 0.03),
+    rifleSightLensGeo: new THREE.BoxGeometry(0.022, 0.022, 0.018),
     sniperBodyGeo: new THREE.BoxGeometry(0.1, 0.55, 0.12),
     sniperBarrelGeo: new THREE.CylinderGeometry(0.02, 0.024, 0.42, 10),
     sniperStockGeo: new THREE.BoxGeometry(0.06, 0.24, 0.09),
@@ -136,7 +149,7 @@ export function sharedHumanoidParts() {
   return SHARED;
 }
 
-export const WEAPON_IDS = ["pistol", "ak47", "sniper", "bazooka", "knife"];
+export const WEAPON_IDS = ["pistol", "smg", "battlerifle", "sniper", "bazooka", "knife"];
 
 // A held weapon prop clipped to a gun hand, built part-for-part to match its first-person
 // counterpart in weapon.js (same body/barrel/grip/mag/sights, same relative proportions) —
@@ -169,7 +182,7 @@ export function buildWeaponProp(s, weaponId = "pistol") {
   const group = new THREE.Group();
   let muzzle;
 
-  if (weaponId === "ak47") {
+  if (weaponId === "smg") {
     group.add(new THREE.Mesh(s.akBodyGeo, metalMat));
     const rail = new THREE.Mesh(s.akRailGeo, metalMat);
     rail.position.set(0, 0.015, -0.072);
@@ -199,6 +212,36 @@ export function buildWeaponProp(s, weaponId = "pistol") {
     sightRing.rotation.x = Math.PI / 2;
     group.add(sightRing);
     muzzle = { x: 0, y: -0.495, z: -0.01 };
+  } else if (weaponId === "battlerifle") {
+    group.add(new THREE.Mesh(s.rifleBodyGeo, metalMat));
+    const rail = new THREE.Mesh(s.rifleRailGeo, metalMat);
+    rail.position.set(0, 0.02, -0.07);
+    group.add(rail);
+    const barrel = new THREE.Mesh(s.rifleBarrelGeo, metalMat);
+    barrel.position.set(0, -0.31, -0.005);
+    group.add(barrel);
+    const barrelTip = new THREE.Mesh(s.rifleBarrelTipGeo, metalMat);
+    barrelTip.position.set(0, -0.465, -0.005);
+    group.add(barrelTip);
+    const foregrip = new THREE.Mesh(s.rifleForegripGeo, metalMat);
+    foregrip.position.set(0, -0.22, 0.1);
+    foregrip.rotation.x = 0.15;
+    group.add(foregrip);
+    const grip = new THREE.Mesh(s.rifleGripGeo, metalMat);
+    grip.position.set(0, 0.18, 0.14);
+    grip.rotation.x = 0.32;
+    group.add(grip);
+    const mag = new THREE.Mesh(s.rifleMagGeo, metalMat);
+    mag.position.set(0, 0.05, 0.17);
+    mag.rotation.x = -0.24;
+    group.add(mag);
+    const sightBase = new THREE.Mesh(s.rifleSightBaseGeo, metalMat);
+    sightBase.position.set(0, -0.06, -0.095);
+    group.add(sightBase);
+    const sightLens = new THREE.Mesh(s.rifleSightLensGeo, lensMat);
+    sightLens.position.set(0, -0.06, -0.113);
+    group.add(sightLens);
+    muzzle = { x: 0, y: -0.485, z: -0.005 };
   } else if (weaponId === "sniper") {
     group.add(new THREE.Mesh(s.sniperBodyGeo, metalMat));
     const barrel = new THREE.Mesh(s.sniperBarrelGeo, metalMat);
@@ -305,6 +348,38 @@ export function buildWeaponProp(s, weaponId = "pistol") {
   return { group, flash, flashMat, flashLight };
 }
 
+// --- Real character model, preloaded once at app startup (see preloadCharacterModel(), called
+// from main.js) --------------------------------------------------------------------------
+// buildHumanoidBody() below stays 100% synchronous — every caller (Enemy's spawn loop,
+// RemotePlayer's constructor, beginDeathRagdoll's respawn-triggered call) needs a body back
+// immediately, and none of those three call sites can easily become async. So the async OBJ
+// load is kept entirely separate from body-building: preload once into MODEL_PARTS, and
+// buildHumanoidBody just synchronously reads whatever's there. If it's called before the
+// preload finishes (a slow network, or an implausibly fast click-through the menu), it falls
+// back to the original primitive geometry below rather than ever failing to produce a body.
+const MODEL_PARTS = {}; // partName -> { geometry, pivot: {x,y,z} }
+const MODEL_PART_NAMES = ["Head", "Body", "Left_Arm", "Right_Arm", "Left_Leg", "Right_Leg"];
+let modelReady = false;
+
+export async function preloadCharacterModel() {
+  try {
+    const [obj, pivots] = await Promise.all([
+      new OBJLoader().loadAsync("/models/Character%20Model.obj"),
+      fetch("/models/Character%20Model.pivots.json").then((r) => r.json()),
+    ]);
+    for (const child of obj.children) {
+      if (!child.isMesh) continue;
+      const pivot = pivots[child.name];
+      if (!pivot) continue;
+      MODEL_PARTS[child.name] = { geometry: child.geometry, pivot };
+    }
+    modelReady = MODEL_PART_NAMES.every((name) => MODEL_PARTS[name]);
+    if (!modelReady) console.warn("Character model preload incomplete — using the primitive rig instead.");
+  } catch (err) {
+    console.warn("Character model failed to load — using the primitive rig instead.", err);
+  }
+}
+
 // Builds just the body — torso/head/face/limbs/boots/hands — with no gun, hitbox,
 // health bar, or ragdoll bookkeeping; callers (Enemy, RemotePlayer) attach whichever of
 // those they need on top. `materialOverrides` lets a caller (e.g. a per-player color
@@ -321,6 +396,55 @@ export function buildHumanoidBody(s, materialOverrides = {}) {
   const group = new THREE.Group();
   const visual = new THREE.Group();
   group.add(visual);
+
+  if (modelReady) {
+    // The source model used to be authored facing +Z while this whole rig (camera, movement,
+    // the AIM_ARM_ANGLE convention every arm-raise/walk-swing rotation assumes) treats -Z as
+    // forward — confirmed by comparing the model's own nose against its raised gun arm. That
+    // mismatch is now corrected directly in the asset itself (every vertex and normal in
+    // Character Model.obj was rotated 180° around Y, and pivots.json updated to match), so no
+    // runtime correction group is needed here anymore — the model's own local space already
+    // matches -Z-forward, same as the primitive rig below.
+    const torso = new THREE.Mesh(MODEL_PARTS.Body.geometry, clothingMat);
+    torso.position.set(MODEL_PARTS.Body.pivot.x, MODEL_PARTS.Body.pivot.y, MODEL_PARTS.Body.pivot.z);
+    torso.castShadow = true;
+    visual.add(torso);
+
+    // No separate eye/mouth sub-meshes for this model (its head is one sculpted surface with
+    // no distinct eye/mouth geometry to color independently) — the whole head is just skinMat.
+    const head = new THREE.Mesh(MODEL_PARTS.Head.geometry, skinMat);
+    head.position.set(MODEL_PARTS.Head.pivot.x, MODEL_PARTS.Head.pivot.y, MODEL_PARTS.Head.pivot.z);
+    head.castShadow = true;
+    visual.add(head);
+
+    // Each limb's geometry is already recentered on its own joint (shoulder/hip) from the
+    // earlier pivot-fix pass, so — unlike the primitive path below — the mesh needs no local
+    // offset inside its pivot at all; it sits at local (0,0,0) and the pivot itself carries the
+    // joint's real world position.
+    function buildLimb(partName, material) {
+      const part = MODEL_PARTS[partName];
+      const pivot = new THREE.Object3D();
+      pivot.position.set(part.pivot.x, part.pivot.y, part.pivot.z);
+      const mesh = new THREE.Mesh(part.geometry, material);
+      mesh.castShadow = true;
+      pivot.add(mesh);
+      visual.add(pivot);
+      return pivot;
+    }
+
+    // bootMat for legs: the model's legs already include an integrated boot shape (no separate
+    // boot sub-mesh to color differently), so the whole leg reads as the existing dark boot tone.
+    const leftLeg = buildLimb("Left_Leg", bootMat);
+    const rightLeg = buildLimb("Right_Leg", bootMat);
+    const leftArm = buildLimb("Left_Arm", clothingMat);
+    const rightArm = buildLimb("Right_Arm", clothingMat);
+
+    // No hand prop for the model path anymore — a plain cube looked out of place stuck on the
+    // end of the sculpted arm. The arm's own capped end (see the earlier hand-cleanup pass) is
+    // the visible terminus now, same as a sleeve cuff with nothing poking out of it.
+
+    return { group, visual, torso, head, leftLeg, rightLeg, leftArm, rightArm };
+  }
 
   const torso = new THREE.Mesh(s.torsoGeo, clothingMat);
   torso.position.y = 1.15;

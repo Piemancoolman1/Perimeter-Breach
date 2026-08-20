@@ -36,15 +36,15 @@ const PLAYER_COLORS = [0x3a5f7a, 0x7a3a3a, 0x7a6a3a, 0x5a3a7a, 0x3a7a6a, 0x7a3a6
 const POS_LERP_SPEED = 12;
 const ROT_LERP_SPEED = 10;
 
-// Assassin's Invisibility (main.js's `invisibleTimer`, broadcast as `invisible` in the
+// Assassin's Invisibility (main.js's `invisibleUntil`, broadcast as `invisible` in the
 // position tick) — a lerp rate rather than a tracked fade timer, same trick position/rotation
 // already use. This exponential approach (`opacity += (target - opacity) * rate * dt`)
 // reaches ~95% of the way to its target after 3/rate seconds — at rate 6 that's ~0.5s,
 // which is what reads as "fades over half a second" rather than snapping.
 const INVISIBLE_FADE_RATE = 6;
 
-// Post-respawn invincibility shield — broadcast by the owning client (main.js's `invincibleTimer
-// > 0`) in every position tick, so peers can see at a glance that shooting this player won't
+// Post-respawn invincibility shield — broadcast by the owning client (main.js's `invincibleUntil
+// > Date.now()`) in every position tick, so peers can see at a glance that shooting this player won't
 // land a hit rather than only finding out via a "no damage" surprise. A low-poly sphere
 // enveloping the whole body (shared geometry across every RemotePlayer instance — it never
 // changes shape, only opacity — but a per-instance material, since opacity is mutated every
@@ -202,6 +202,16 @@ export class RemotePlayer {
     this.invincibleGlow.visible = false;
     this.group.add(this.invincibleGlow);
 
+    // Collected once (shadow-casting is a static property of the mesh, not the material) so
+    // Invisibility can hide this player's ground shadow in step with their body fading out —
+    // castShadow is ignored by Three.js's shadow-map pass regardless of material opacity, so
+    // without this an invisible player still throws a fully solid, visible shadow.
+    this.shadowMeshes = [];
+    this.group.traverse((obj) => {
+      if (obj.isMesh && obj.castShadow) this.shadowMeshes.push(obj);
+    });
+    this.shadowsHidden = false;
+
     this.group.position.set(x, 0, z);
     scene.add(this.group);
   }
@@ -223,19 +233,23 @@ export class RemotePlayer {
 
   // Latest state from a "pos" relay message — stored as a lerp target, not applied
   // immediately, so movement between the ~15Hz updates still reads smoothly. Includes
-  // the network Y (feet height) so jumps/falls are visible, not just XZ movement.
-  updateFromNetwork(x, y, z, rotY, health, isMoving, weaponId, pitch, invincible, invisible) {
+  // the network Y (feet height) so jumps/falls are visible, not just XZ movement. Health is no
+  // longer part of this tick at all — see handleDamageApplied/handlePlayerSpawned in
+  // matchLifecycle.js, the server-authoritative sources of truth for it now.
+  updateFromNetwork(x, y, z, rotY, isMoving, weaponId, pitch) {
     this.targetPos.set(x, y, z);
     this.targetRotY = rotY;
-    this.health = health;
     this.isMoving = isMoving;
     this.targetPitch = pitch || 0;
-    this.invincible = !!invincible;
-    this.targetInvisible = !!invisible;
     if (weaponId) this.setWeapon(weaponId);
   }
 
-  update(dt, cameraPos, cameraRight, revealedByPulse = false) {
+  // `invincible`/`invisible` are server-issued (see main.js's render loop, sourced from
+  // ctx.remoteEffectUntil) rather than living on a "pos" tick — a peer's own client is no longer
+  // trusted to self-report either one.
+  update(dt, cameraPos, cameraRight, revealedByPulse = false, invincible = false, invisible = false) {
+    this.invincible = invincible;
+    this.targetInvisible = invisible;
     this.group.position.lerp(this.targetPos, Math.min(1, POS_LERP_SPEED * dt));
 
     // Shortest-path angle wrap into [-PI, PI). JS's `%` is a remainder operator, not a
@@ -292,6 +306,16 @@ export class RemotePlayer {
     this.weaponLensMat.opacity += (targetOpacity - this.weaponLensMat.opacity) * opacityLerp;
     this.weaponScopeLensMat.opacity += (targetOpacity - this.weaponScopeLensMat.opacity) * opacityLerp;
 
+    // Shadow-casting is a mesh flag, not something the material fade above touches at all — a
+    // body faded to near-zero opacity would otherwise still throw a fully solid shadow,
+    // betraying an invisible player's position. Toggled only on actual state change (not every
+    // frame) since it's a discrete on/off, not something worth lerping.
+    const nearlyInvisible = this.clothingMat.opacity < 0.05;
+    if (nearlyInvisible !== this.shadowsHidden) {
+      this.shadowsHidden = nearlyInvisible;
+      for (const mesh of this.shadowMeshes) mesh.castShadow = !nearlyInvisible;
+    }
+
     updateHealthBarSprite(this.healthBarFg, this.healthBarFgMat, this.health / this.maxHealth, cameraRight);
     if (cameraPos) {
       const distToCamera = this.group.position.distanceTo(cameraPos);
@@ -334,7 +358,7 @@ export class RemotePlayer {
     // Always a fully-visible explosion, regardless of Invisibility's current fade state or
     // remaining duration — a killer should always get clear visual confirmation of the kill,
     // never watch an invisible (or mid-fade) corpse fly apart. matchLifecycle.js separately
-    // zeroes the *victim's own* invisibleTimer on death; this is what guarantees the same for
+    // zeroes the *victim's own* invisibleUntil on death; this is what guarantees the same for
     // every observer's already-rendered copy, regardless of network timing between the two.
     this.clothingMat.opacity = 1;
     this.skinMat.opacity = 1;

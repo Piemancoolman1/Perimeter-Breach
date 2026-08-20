@@ -8,11 +8,50 @@ export async function showAppVersion() {
   if (!("__TAURI_INTERNALS__" in window)) return;
   try {
     const { getVersion } = await import("@tauri-apps/api/app");
-    el.appVersion.textContent = `v${await getVersion()}`;
+    const versionText = `v${await getVersion()}`;
+    el.appVersion.textContent = versionText;
     el.appVersion.classList.remove("hidden");
+    // Also mirrored into the pause menu, since the corner badge hides itself during actual
+    // gameplay (see updateAppVersionVisibility() in main.js) — this is the only place a paused
+    // player can still see which build they're on.
+    el.pauseVersion.textContent = versionText;
+    el.pauseVersion.classList.remove("hidden");
   } catch (err) {
     console.warn("Could not read app version", err);
   }
+}
+
+// Wires the "Quit Game" buttons (landing screen + in-game pause menu) and their shared
+// confirmation popup. Only meaningful inside the packaged Tauri app — a plain browser tab has
+// no process to exit, so the buttons stay hidden there (same guard as showAppVersion above).
+export function setupQuitGame(ctx) {
+  if (!("__TAURI_INTERNALS__" in window)) return;
+
+  el.quitGameBtn.classList.remove("hidden");
+  el.pauseQuitBtn.classList.remove("hidden");
+
+  function openQuitConfirm() {
+    ctx.screens.showScreen(el.quitConfirmScreen);
+  }
+
+  el.quitGameBtn.addEventListener("click", openQuitConfirm);
+  el.pauseQuitBtn.addEventListener("click", openQuitConfirm);
+
+  el.quitCancelBtn.addEventListener("click", () => ctx.screens.showPreviousScreen());
+
+  el.quitConfirmBtn.addEventListener("click", async () => {
+    el.quitConfirmBtn.disabled = true;
+    try {
+      const { exit } = await import("@tauri-apps/plugin-process");
+      await exit(0);
+    } catch (err) {
+      // Only reachable if the exit call itself rejects (it never resolves on success — the
+      // process is gone by then) — surface it instead of leaving the button dead with no
+      // explanation, same reasoning as the update-install failure path below.
+      console.warn("Quit failed", err);
+      el.quitConfirmBtn.disabled = false;
+    }
+  });
 }
 
 // Checks for a newer packaged-app release once on startup. `__TAURI_INTERNALS__` is the

@@ -107,7 +107,8 @@ function buildPistolMesh() {
   };
 }
 
-function buildAk47Mesh() {
+// Scout's SMG — same model the AK-47 used to be (see weaponDefs.js's "smg" entry for why).
+function buildSmgMesh() {
   const group = new THREE.Group();
 
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.13, 0.42), metalMat);
@@ -162,6 +163,70 @@ function buildAk47Mesh() {
     sightLocal: new THREE.Vector3(0, 0.115, -0.16),
     restPos: new THREE.Vector3(0.32, -0.32, -0.62),
     restRot: new THREE.Euler(0.03, -0.18, 0),
+  };
+}
+
+// Assault's new primary — same overall body/rail/barrel language as the SMG above (still the
+// project's low-poly box/cylinder vocabulary), but with two deliberate silhouette differences
+// so it doesn't just read as "the SMG with a new name": a vertical foregrip hanging below the
+// handguard (the SMG has nothing there), and a flat reflex-sight box with a glowing dot lens
+// instead of the SMG's ring sight.
+function buildBattleRifleMesh() {
+  const group = new THREE.Group();
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.115, 0.125, 0.44), metalMat);
+  body.position.set(0, 0, 0.04);
+  group.add(body);
+
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.015, 0.34), metalMat);
+  rail.position.set(0, 0.07, 0.02);
+  group.add(rail);
+
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.026, 0.3, 10), metalMat);
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.set(0, 0.005, -0.31);
+  group.add(barrel);
+
+  const barrelTip = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.035, 10), metalMat);
+  barrelTip.rotation.x = Math.PI / 2;
+  barrelTip.position.set(0, 0.005, -0.465);
+  group.add(barrelTip);
+
+  const foregrip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.06), metalMat);
+  foregrip.position.set(0, -0.1, -0.22);
+  foregrip.rotation.x = 0.15;
+  group.add(foregrip);
+
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.21, 0.1), metalMat);
+  grip.position.set(0, -0.14, 0.18);
+  grip.rotation.x = 0.32;
+  group.add(grip);
+
+  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.22, 0.08), metalMat);
+  mag.position.set(0, -0.17, 0.05);
+  mag.rotation.x = -0.24;
+  group.add(mag);
+
+  const sightBase = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.05), metalMat);
+  sightBase.position.set(0, 0.095, -0.06);
+  group.add(sightBase);
+
+  const sightLens = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.018, 0.022), lensMat);
+  sightLens.position.set(0, 0.113, -0.06);
+  group.add(sightLens);
+
+  const fx = buildMuzzleFlashParts(new THREE.Vector3(0, 0.005, -0.485));
+  group.add(fx.muzzleTip, fx.flash, fx.flashLight);
+
+  return {
+    group,
+    muzzleTip: fx.muzzleTip,
+    flash: fx.flash,
+    flashMat: fx.flashMat,
+    flashLight: fx.flashLight,
+    sightLocal: new THREE.Vector3(0, 0.113, -0.06),
+    restPos: new THREE.Vector3(0.31, -0.31, -0.6),
+    restRot: new THREE.Euler(0.03, -0.17, 0),
   };
 }
 
@@ -325,7 +390,8 @@ function buildKnifeMesh() {
 
 const BUILDERS = {
   pistol: buildPistolMesh,
-  ak47: buildAk47Mesh,
+  smg: buildSmgMesh,
+  battlerifle: buildBattleRifleMesh,
   sniper: buildSniperMesh,
   bazooka: buildBazookaMesh,
   knife: buildKnifeMesh,
@@ -385,8 +451,8 @@ export class Weapon {
     return !!this.def.scoped && this.aimProgress > 0.85;
   }
 
-  fire() {
-    this.recoil = 1;
+  fire(recoilMult = 1) {
+    this.recoil = recoilMult;
     this.flashTime = FLASH_DURATION;
   }
 

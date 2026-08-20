@@ -8,6 +8,7 @@ export const el = {
   updateBannerText: document.getElementById("update-banner-text"),
   updateInstallBtn: document.getElementById("update-install-btn"),
   appVersion: document.getElementById("app-version"),
+  quitGameBtn: document.getElementById("quit-game-btn"),
 
   multiplayerScreen: document.getElementById("multiplayer-screen"),
   playerNameInput: document.getElementById("player-name-input"),
@@ -53,11 +54,40 @@ export const el = {
 
   respawnOverlay: document.getElementById("respawn-overlay"),
   respawnTitle: document.getElementById("respawn-title"),
-  respawnTimerEl: document.getElementById("respawn-timer"),
+  respawnBtn: document.getElementById("respawn-btn"),
   scoreboardPanel: document.getElementById("scoreboard-panel"),
   scoreboardList: document.getElementById("scoreboard-list"),
   endScoreboardList: document.getElementById("end-scoreboard-list"),
   backToRoomBtn: document.getElementById("back-to-room-btn"),
+
+  patchNotesBtn: document.getElementById("patch-notes-btn"),
+  patchNotesScreen: document.getElementById("patch-notes-screen"),
+  patchNotesTabs: document.getElementById("patch-notes-tabs"),
+  patchNotesList: document.getElementById("patch-notes-list"),
+  patchNotesBackBtn: document.getElementById("patch-notes-back-btn"),
+
+  accountBtn: document.getElementById("account-btn"),
+  accountScreen: document.getElementById("account-screen"),
+  accountSignedOut: document.getElementById("account-signed-out"),
+  accountSignedIn: document.getElementById("account-signed-in"),
+  accountModeToggle: document.getElementById("account-mode-toggle"),
+  accountModeSignInBtn: document.getElementById("account-mode-signin-btn"),
+  accountModeSignUpBtn: document.getElementById("account-mode-signup-btn"),
+  accountEmailInput: document.getElementById("account-email-input"),
+  accountDisplayNameRow: document.getElementById("account-display-name-row"),
+  accountDisplayNameInput: document.getElementById("account-display-name-input"),
+  accountPasswordInput: document.getElementById("account-password-input"),
+  accountError: document.getElementById("account-error"),
+  accountSubmitBtn: document.getElementById("account-submit-btn"),
+  accountNameDisplay: document.getElementById("account-name-display"),
+  accountStatKills: document.getElementById("account-stat-kills"),
+  accountStatDeaths: document.getElementById("account-stat-deaths"),
+  accountStatWins: document.getElementById("account-stat-wins"),
+  accountStatKd: document.getElementById("account-stat-kd"),
+  accountStatsError: document.getElementById("account-stats-error"),
+  accountRefreshStatsBtn: document.getElementById("account-refresh-stats-btn"),
+  accountSignOutBtn: document.getElementById("account-sign-out-btn"),
+  accountBackBtn: document.getElementById("account-back-btn"),
 
   settingsBtn: document.getElementById("settings-btn"),
   settingsScreen: document.getElementById("settings-screen"),
@@ -75,10 +105,18 @@ export const el = {
   classDescription: document.getElementById("class-description"),
   spawnInBtn: document.getElementById("spawn-in-btn"),
   pauseHint: document.getElementById("pause-hint"),
+  pauseTitle: document.getElementById("pause-title"),
   resumeBtn: document.getElementById("resume-btn"),
+  backToRespawnBtn: document.getElementById("back-to-respawn-btn"),
   changeClassBtn: document.getElementById("change-class-btn"),
   pauseSettingsBtn: document.getElementById("pause-settings-btn"),
   exitToMenuBtn: document.getElementById("exit-to-menu-btn"),
+  pauseQuitBtn: document.getElementById("pause-quit-btn"),
+  pauseVersion: document.getElementById("pause-version"),
+  loadingScreen: document.getElementById("loading-screen"),
+  quitConfirmScreen: document.getElementById("quit-confirm-screen"),
+  quitConfirmBtn: document.getElementById("quit-confirm-btn"),
+  quitCancelBtn: document.getElementById("quit-cancel-btn"),
   endScreen: document.getElementById("end-screen"),
   endTitle: document.getElementById("end-title"),
   endMessage: document.getElementById("end-message"),
@@ -151,3 +189,7 @@ document.addEventListener("fullscreenchange", () => {
   el.fullscreenBtn.classList.toggle("is-fullscreen", !!document.fullscreenElement);
 });
 if (!document.fullscreenEnabled) el.fullscreenBtn.style.display = "none";
+// The packaged desktop app already has real window chrome (native maximize button, visible in
+// its own title bar) — this in-page button only earns its keep in a plain browser tab, where
+// there's no other way to reclaim the space mobile chrome (address bar/tab bar) eats into.
+if ("__TAURI_INTERNALS__" in window) el.fullscreenBtn.style.display = "none";

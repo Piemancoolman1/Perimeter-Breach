@@ -3,14 +3,15 @@ import { el } from "./dom.js";
 import { settings } from "./settings.js";
 import { formatGrenadeCount } from "./hud.js";
 import { GRENADE_DEF } from "./weaponDefs.js";
+import { OVERCLOCK_FIRE_RATE_MULT, OVERCLOCK_RECOIL_MULT } from "./abilities.js";
 import { Grenade, Rocket, splashDamageEnemies, splashDamagePlayer } from "./projectiles.js";
 import { breakApartEnemy } from "./entities.js";
-import { loadPlayerName } from "./lobbyUi.js";
 
 // Weapon firing, grenade throwing, and explosion/splash-damage handling — the local player's
 // entire "deal damage" surface. Never touches a remote player's health directly (see
-// explodeAt/fireWeapon's own comments): a hit on a peer sends *them* a message and their own
-// client decides what happens, the trust model this whole game is built on.
+// explodeAt/fireWeapon's own comments): a hit on a peer is reported to the *server*, which
+// applies it and tells everyone the result — see server/index.js's handleReportHit and the
+// server-authoritative combat plan for the full trust model.
 export function createCombat(ctx) {
   function grenadeThrowVelocity() {
     const forward = new THREE.Vector3();
@@ -51,6 +52,11 @@ export function createCombat(ctx) {
     stopHoldingGrenade();
     consumeGrenadeCharge();
     ctx.grenades.push(new Grenade(ctx.scene, origin, velocity, GRENADE_DEF.fuse));
+    // Grenade-charge authority lives server-side too (see server/index.js's
+    // handleReportGrenadeThrow) — the local grenadeCount above still drives this client's own UI/
+    // gating exactly as before, this just reports it so the server's own ledger (and the splash-
+    // hit credit any resulting explosion needs — see combat.js's explodeAt) stays in sync.
+    if (ctx.inMatch && ctx.lobby) ctx.lobby.reportGrenadeThrow();
   }
 
   function registerKill(enemy, blast = null) {
@@ -70,7 +76,10 @@ export function createCombat(ctx) {
     ctx.sounds.play("explosion", { volume: 0.8, rate: 0.96 + Math.random() * 0.08 });
   }
 
-  function explodeAt(position, radius, damage) {
+  // `weaponId` identifies the splash source ("grenade"/"bazooka"/"mine") for the server's
+  // report_hit damage clamp (see server/index.js's handleReportHit) — every caller passes one now
+  // (main.js's grenade/rocket explosion handling, abilities.js's triggerMine).
+  function explodeAt(position, radius, damage, weaponId) {
     explodeVisualOnly(position, radius);
 
     const killed = splashDamageEnemies(position, radius, damage, ctx.enemies);
@@ -78,22 +87,27 @@ export function createCombat(ctx) {
     for (const e of killed) registerKill(e, blast);
 
     if (ctx.inMatch && ctx.lobby) {
-      // Same "send them the hit, never touch their health directly" rule as hitscan. `blast`
-      // (already computed above for the enemy ragdoll) rides along so that if this hit is
-      // lethal, the victim's peers see their avatar scatter apart like an explosive enemy
-      // kill instead of a plain-gunshot collapse.
+      // Health/damage authority lives server-side (see handleReportHit) — this reports the hit
+      // for the server to apply, rather than the old direct relayToPlayer the victim trusted and
+      // applied to itself. Exact falloff-based `dmg` is still client-computed (that stays out of
+      // scope) but the server clamps it to this weapon's real max.
       for (const rp of ctx.remotePlayers.values()) {
         const dmg = splashDamagePlayer(position, radius, damage, rp.group.position);
         if (dmg > 0) {
-          ctx.lobby.relayToPlayer(rp.id, { t: "hit", damage: dmg, fromId: ctx.myPlayerId, fromName: loadPlayerName(), blast });
+          ctx.lobby.reportHit({ targetId: rp.id, weaponId, damage: dmg, blast });
         }
       }
     }
 
     const playerDmg = splashDamagePlayer(position, radius, damage, ctx.camera.position);
     if (playerDmg > 0) {
-      if (ctx.inMatch) {
-        ctx.matchLifecycle.damageLocalPlayer(playerDmg, null, "", blast); // a suicide via your own blast — no kill credit
+      if (ctx.inMatch && ctx.lobby) {
+        // Self-damage from your own blast now also goes through the server (targetId === your
+        // own id) rather than applying locally — keeps the server's tracked health for this
+        // player in sync so a later peer-inflicted hit isn't computed against a stale value.
+        // recordElim's suicide handling (server/index.js) treats a self-targeted hit the same
+        // "own goal" way a killerless one used to be treated.
+        ctx.lobby.reportHit({ targetId: ctx.myPlayerId, weaponId, damage: playerDmg, blast });
       } else {
         ctx.player.takeDamage(playerDmg);
         ctx.vfx.flashHit();
@@ -102,25 +116,29 @@ export function createCombat(ctx) {
     }
   }
 
+  // Returns whether a shot actually fired — updateBurstFire() below needs to know, so it can
+  // tell "this burst round fired" apart from "still on the per-shot cooldown, try again next
+  // frame" apart from "ran out of ammo, stop trying."
   function fireWeapon() {
     const def = ctx.loadout.current.def;
-    if (!ctx.loadout.fire()) {
+    const overclocked = ctx.overclockUntil > Date.now();
+    if (!ctx.loadout.fire(overclocked ? OVERCLOCK_FIRE_RATE_MULT : 1)) {
       if (!ctx.loadout.current.slot.isReloading && ctx.loadout.current.slot.ammo <= 0) ctx.vfx.pulseAmmoEmpty();
-      return;
+      return false;
     }
 
-    ctx.loadout.current.view.fire();
+    ctx.loadout.current.view.fire(overclocked ? OVERCLOCK_RECOIL_MULT : 1);
     ctx.vfx.pulseCrosshair();
     ctx.fovKick = 2.2;
     ctx.debugGraphs.markShot();
-    ctx.sounds.play(`fire_${def.id}`, { volume: 0.8, rate: 0.98 + Math.random() * 0.04 });
+    ctx.sounds.play(`fire_${def.soundId ?? def.id}`, { volume: 0.8, rate: 0.98 + Math.random() * 0.04 });
 
     ctx.raycaster.setFromCamera(ctx.screenCenter, ctx.camera);
     // A shared Raycaster instance is reused for every weapon's shot — always set `.far`
     // explicitly each time rather than only for melee, or a knife's short range would
     // otherwise leak into whatever weapon fires next after a class change.
     ctx.raycaster.far = def.range ?? Infinity;
-    if (def.spread > 0) {
+    if (def.spread > 0 && !overclocked) {
       ctx.raycaster.ray.direction.x += (Math.random() - 0.5) * def.spread;
       ctx.raycaster.ray.direction.y += (Math.random() - 0.5) * def.spread;
       ctx.raycaster.ray.direction.normalize();
@@ -146,6 +164,7 @@ export function createCombat(ctx) {
     }
 
     let hitRemote = false;
+    let hitRemoteId = null;
     if (def.hitscan) {
       if (hits.length > 0) {
         const hit = hits[0];
@@ -158,13 +177,9 @@ export function createCombat(ctx) {
           ctx.sounds.play("hitmarker", { volume: 0.6 });
           if (enemy.takeDamage(def.damage)) registerKill(enemy);
         } else if (remote) {
-          // Never touch the remote player's health directly — send *them* the hit and let
-          // their own client decide what happens, same trust model as everything else here.
           hitRemote = true;
+          hitRemoteId = remote.id;
           ctx.sounds.play("hitmarker", { volume: 0.6 });
-          if (ctx.lobby) {
-            ctx.lobby.relayToPlayer(remote.id, { t: "hit", damage: def.damage, fromId: ctx.myPlayerId, fromName: loadPlayerName() });
-          }
         }
       } else if (!def.melee) {
         ctx.vfx.bolt(muzzleOrigin, hitPoint, 0x2a6b7a);
@@ -176,18 +191,56 @@ export function createCombat(ctx) {
       ctx.rockets.push(rocket);
     }
 
-    // Let peers see and hear this shot too — a plain visual/audio echo (handled on their
-    // end by handleRelay's "fire" case), never a source of damage authority on its own.
-    // The muzzle point itself isn't sent: each receiver draws the tracer from *their own*
-    // replicated copy of the shooter's rig (rp.getMuzzleWorldPosition()), which is more
-    // accurate than trusting a raw coordinate that may be a tick stale by arrival.
     if (ctx.inMatch && ctx.lobby) {
-      ctx.lobby.relayToRoom({
-        t: "fire",
-        weaponId: def.id,
-        hitPoint: { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z },
-        hitPlayer: hitRemote,
-      });
+      // Ammo/fire-rate authority lives server-side now (see server/index.js's handleReportFire) —
+      // this both reports the shot for that ledger AND replaces the old client-decided
+      // relayToRoom({t:"fire"}) visual echo; peers only see/hear this shot once the server
+      // confirms it (fire_confirmed), not the instant this client fires. The muzzle point itself
+      // isn't sent: each receiver draws the tracer from *their own* replicated copy of the
+      // shooter's rig (rp.getMuzzleWorldPosition()), more accurate than a coordinate that may be
+      // a tick stale by arrival.
+      ctx.lobby.reportFire({ weaponId: def.id, hitPoint: { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z }, hitPlayer: hitRemote });
+      if (hitRemote) {
+        // Health/damage authority lives server-side too (see handleReportHit) — the victim no
+        // longer decides for itself whether to apply this. `damage` only matters for a splash
+        // weapon server-side; a hitscan weapon's exact amount is recomputed from weaponId alone.
+        ctx.lobby.reportHit({ targetId: hitRemoteId, weaponId: def.id, damage: def.damage });
+      }
+    }
+    return true;
+  }
+
+  // Assault's battle rifle: one trigger pull fires a fixed number of shots in quick succession
+  // (def.burstCount) instead of one shot (semi) or continuous fire for as long as it's held
+  // (auto). Fires the first shot immediately — same feel as clicking a semi-auto weapon, and
+  // reuses fireWeapon()'s own empty-ammo feedback for free if the mag's already empty — then
+  // queues the rest for updateBurstFire() to pace out. No-ops if a burst is already in
+  // progress or the cooldown between bursts hasn't cleared yet.
+  function startBurst() {
+    if (ctx.burstShotsQueued > 0 || ctx.burstCooldownRemaining > 0) return;
+    if (fireWeapon()) ctx.burstShotsQueued = ctx.loadout.current.def.burstCount - 1;
+  }
+
+  // Ticks an in-progress burst and the cooldown between bursts. Each remaining queued shot
+  // fires the instant the weapon's own per-shot cooldown (def.fireRate, the same field every
+  // other weapon uses for its rate of fire) allows it — reusing that existing pacing is what
+  // gives a burst its actual rhythm, rather than needing a second timer to duplicate it. Once
+  // the queue drains, starts burstCooldown; if the trigger is still held when that clears, it
+  // auto-chains into another burst, so holding down a burst weapon reads as continuous bursts
+  // rather than requiring a fresh click every time.
+  function updateBurstFire(dt) {
+    if (ctx.loadout.current.def.fireMode !== "burst") return;
+    if (ctx.burstCooldownRemaining > 0) ctx.burstCooldownRemaining -= dt;
+
+    if (ctx.burstShotsQueued > 0) {
+      if (ctx.loadout.current.slot.ammo <= 0) {
+        ctx.burstShotsQueued = 0; // ran dry mid-burst — stop trying rather than spin every frame
+      } else if (fireWeapon()) {
+        ctx.burstShotsQueued--;
+      }
+      if (ctx.burstShotsQueued === 0) ctx.burstCooldownRemaining = ctx.loadout.current.def.burstCooldown;
+    } else if (ctx.leftMouseHeld && !ctx.grenadeHeld && ctx.respawnAt <= Date.now() && ctx.burstCooldownRemaining <= 0) {
+      startBurst();
     }
   }
 
@@ -198,23 +251,31 @@ export function createCombat(ctx) {
   }
 
   function doReload() {
-    if (ctx.state !== "playing" || ctx.grenadeHeld) return;
-    if (ctx.loadout.startReload() && ctx.aimHeld) setAiming(false);
+    if (ctx.state !== "playing" || ctx.grenadeHeld || ctx.respawnAt > Date.now()) return;
+    if (ctx.loadout.startReload()) {
+      if (ctx.aimHeld) setAiming(false);
+      // Reload has no peer-visible effect, so this is a fire-and-forget ledger update (see
+      // server/index.js's handleReportReload) — nothing to reconcile against, unlike ammo/fire.
+      if (ctx.inMatch && ctx.lobby) ctx.lobby.reportReload(ctx.loadout.current.def.id);
+    }
   }
 
   // Extracted so the touch Fire/Aim buttons drive the exact same state the mouse handlers
-  // below do, instead of duplicating the state === "playing"/grenadeHeld guard and the
-  // toggleAim branching a second time.
+  // below do, instead of duplicating the guard and the toggleAim branching a second time.
+  // ctx.respawnAt is checked explicitly (not just ctx.state) because ctx.state alone isn't
+  // enough anymore — a player can be back in "playing" state (pointer re-locked) via the pause
+  // menu's other buttons while still dead, in the moment before they've actually clicked Respawn.
   function handleFireStart() {
-    if (ctx.state !== "playing" || ctx.grenadeHeld) return;
+    if (ctx.state !== "playing" || ctx.grenadeHeld || ctx.respawnAt > Date.now()) return;
     ctx.leftMouseHeld = true;
-    fireWeapon();
+    if (ctx.loadout.current.def.fireMode === "burst") startBurst();
+    else fireWeapon();
   }
   function handleFireEnd() {
     ctx.leftMouseHeld = false;
   }
   function handleAimStart() {
-    if (ctx.state !== "playing" || ctx.grenadeHeld) return;
+    if (ctx.state !== "playing" || ctx.grenadeHeld || ctx.respawnAt > Date.now()) return;
     setAiming(settings.toggleAim ? !ctx.aimHeld : true);
   }
   function handleAimEnd() {
@@ -231,6 +292,7 @@ export function createCombat(ctx) {
     explodeVisualOnly,
     explodeAt,
     fireWeapon,
+    updateBurstFire,
     setAiming,
     doReload,
     handleFireStart,

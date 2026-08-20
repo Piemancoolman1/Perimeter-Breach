@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { collideProjectile } from "./world.js";
+import { collideProjectile, projectileHitsObstacle } from "./world.js";
 
 export const GRENADE_GRAVITY = -16;
 export const GRENADE_RADIUS = 0.12;
@@ -62,6 +62,7 @@ export function predictGrenadeArc(origin, velocity, duration, steps = 24) {
 }
 
 const ROCKET_GROUND_CLEARANCE = 0.06;
+const ROCKET_RADIUS = 0.15; // a bit larger than the mesh's own radius — a forgiving contact check, matching GRENADE_RADIUS's spirit
 const rocketGeo = new THREE.CylinderGeometry(0.08, 0.1, 0.56, 8); // 2x the original 0.04/0.05/0.28
 const rocketMat = new THREE.MeshStandardMaterial({
   color: 0x2a2a2a,
@@ -91,7 +92,13 @@ export class Rocket {
   }
 
   // Returns true the frame it reaches its target (caller should explode() and destroy()).
-  update(dt) {
+  // `obstacles`, when given, lets the rocket detonate the instant it actually touches a wall/
+  // rock/building/car along the way, rather than only at its precomputed impact point — the
+  // fire-time raycast (combat.js) already accounts for obstacles in the way *at that moment*,
+  // but nothing previously re-checked during flight, so anything that moved into the path (or
+  // any mismatch between the aim raycast and the rocket's own travel line) let it visibly fly
+  // through solid geometry with no explosion at all.
+  update(dt, obstacles) {
     if (this.arrived) return false;
     this.t += dt / this.duration;
     if (this.t >= 1) {
@@ -104,6 +111,10 @@ export class Rocket {
     // (a bad target point), detonate on ground contact instead of visibly clipping through it.
     if (this.mesh.position.y <= ROCKET_GROUND_CLEARANCE) {
       this.mesh.position.y = ROCKET_GROUND_CLEARANCE;
+      this.arrived = true;
+      return true;
+    }
+    if (obstacles && projectileHitsObstacle(this.mesh.position, ROCKET_RADIUS, obstacles)) {
       this.arrived = true;
       return true;
     }

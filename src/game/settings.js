@@ -80,21 +80,7 @@ export function createSettingsUi(ctx) {
     ctx.touchControls.setForced(settings.forceTouchControls);
   });
 
-  let settingsReturnTo = el.landing;
-  el.settingsBtn.addEventListener("click", () => {
-    settingsReturnTo = el.landing;
-    el.landing.classList.add("hidden");
-    el.settingsScreen.classList.remove("hidden");
-  });
-
-  el.pauseSettingsBtn.addEventListener("click", () => {
-    settingsReturnTo = el.pauseHint;
-    el.pauseHint.classList.add("hidden");
-    el.settingsScreen.classList.remove("hidden");
-  });
-
-  el.settingsBackBtn.addEventListener("click", () => {
-    el.settingsScreen.classList.add("hidden");
-    settingsReturnTo.classList.remove("hidden");
-  });
+  el.settingsBtn.addEventListener("click", () => ctx.screens.showScreen(el.settingsScreen));
+  el.pauseSettingsBtn.addEventListener("click", () => ctx.screens.showScreen(el.settingsScreen));
+  el.settingsBackBtn.addEventListener("click", () => ctx.screens.showPreviousScreen());
 }

@@ -1,9 +1,57 @@
+/* Self-hosted (not a Google Fonts CDN @import) — this is a desktop app that shouldn't lose its
+   whole menu typography if launched offline. Oswald is a variable font on Google's end; the one
+   file covers the full 400-700 weight range rather than needing 4 duplicate @font-face blocks
+   each pointing at the same bytes. */
+@font-face {
+  font-family: "Black Ops One";
+  src: url("/fonts/black-ops-one.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Oswald";
+  src: url("/fonts/oswald.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Share Tech Mono";
+  src: url("/fonts/share-tech-mono.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
+  /* In-combat HUD accent (crosshair, stat bars, touch controls, debug panel) — left as the
+     original cyan. The military/amber re-theme below (menus/lobby/overlays — everything
+     living inside .panel, plus the corner badges) is a deliberately separate palette scoped to
+     the screens between matches, not gameplay itself; see the "menu theme" block for why. */
   --accent: #4de3ff;
   --accent-soft: rgba(77, 227, 255, 0.35);
-  --danger: #ff4d5e;
+  --danger: #d1453b;
   --bg-panel: rgba(8, 14, 20, 0.86);
   color-scheme: dark;
+
+  /* ===== Menu theme: gunmetal/steel + amber, applied to .overlay/.panel and everything inside
+     them (Main Menu, Multiplayer, Settings, Room, Class Select, Pause, Patch Notes, End screen)
+     — never the in-match HUD, which keeps the cyan scheme above untouched. ===== */
+  --menu-bg-0: #0b0c0e;
+  --menu-bg-1: #16181b;
+  --menu-panel-top: #1c1e21;
+  --menu-panel-bottom: #131518;
+  --menu-panel-edge: #34373c;
+  --menu-olive: #7d8288;
+  --menu-olive-dim: #2c2e32;
+  --menu-amber: #e8a33d;
+  --menu-amber-bright: #ffc266;
+  --menu-text-0: #e8e9ea;
+  --menu-text-1: #8a8f94;
+  --font-display: "Black Ops One", "Oswald", sans-serif;
+  --font-body: "Oswald", sans-serif;
+  --font-mono: "Share Tech Mono", monospace;
 }
 
 * {
@@ -246,7 +294,7 @@ html, body {
 @keyframes ammo-empty-pulse {
   0% {
     color: var(--danger);
-    text-shadow: 0 0 10px rgba(255, 77, 94, 0.8);
+    text-shadow: 0 0 10px rgba(209, 69, 59, 0.8);
   }
   100% {
     color: inherit;
@@ -595,7 +643,7 @@ body.touch-controls-active #touch-controls {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(ellipse at center, rgba(10, 20, 28, 0.55) 0%, rgba(2, 4, 6, 0.92) 100%);
+  background: radial-gradient(ellipse at center, rgba(18, 18, 20, 0.55) 0%, rgba(3, 3, 4, 0.92) 100%);
 }
 .overlay.hidden {
   display: none;
@@ -606,13 +654,50 @@ body.touch-controls-active #touch-controls {
 }
 
 .panel {
-  background: var(--bg-panel);
-  border: 1px solid rgba(77, 227, 255, 0.25);
-  border-radius: 12px;
+  position: relative;
+  background: linear-gradient(180deg, var(--menu-panel-top), var(--menu-panel-bottom));
+  border: 1px solid var(--menu-panel-edge);
+  clip-path: polygon(0 18px, 18px 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%);
   padding: 40px 48px;
   max-width: 480px;
   text-align: center;
-  box-shadow: 0 0 60px rgba(77, 227, 255, 0.08), 0 20px 50px rgba(0, 0, 0, 0.6);
+  color: var(--menu-text-0);
+  font-family: var(--font-body);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+/* HUD-style corner accents, split across two pseudo-elements since the panel's own clip-path
+   (above) only bevels the top-left/bottom-right corners — an L-shaped bracket (right-angle bars)
+   only makes sense on the two corners that are still actually right angles. */
+.panel::before {
+  /* Top-left/bottom-right: trace the diagonal bevel itself, rather than an L-bracket floating
+     over the void the clip-path just cut away. Each gradient box is exactly the same 18px the
+     clip-path polygon() above cuts, so its corner-to-corner diagonal lands exactly on the cut
+     edge — "to bottom right" is the gradient axis perpendicular to that edge, so a hard stop at
+     its midpoint draws a 2px line centered on the true bevel, not an approximation of it. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to bottom right, transparent calc(50% - 1px), var(--menu-amber) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) top left / 18px 18px no-repeat,
+    linear-gradient(to bottom right, transparent calc(50% - 1px), var(--menu-amber) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) bottom right / 18px 18px no-repeat;
+  opacity: 0.9;
+}
+.panel::after {
+  /* Top-right/bottom-left: still true right angles, so the original L-bracket (two thin amber
+     bars per corner via layered backgrounds) still fits. Inset 2px rather than the reference
+     design's overflowing -2px, so they can't get clipped by the polygon() above (which only
+     shapes this element's own box, not anything told to render outside it). */
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--menu-amber), var(--menu-amber)) top 2px right 2px / 20px 2px no-repeat,
+    linear-gradient(var(--menu-amber), var(--menu-amber)) top 2px right 2px / 2px 20px no-repeat,
+    linear-gradient(var(--menu-amber), var(--menu-amber)) bottom 2px left 2px / 20px 2px no-repeat,
+    linear-gradient(var(--menu-amber), var(--menu-amber)) bottom 2px left 2px / 2px 20px no-repeat;
+  opacity: 0.9;
 }
 .panel.small {
   padding: 26px 40px;
@@ -622,22 +707,49 @@ body.touch-controls-active #touch-controls {
   width: 100%;
 }
 
+/* Every other panel heading (Multiplayer, Settings, Room, Patch Notes, ...) is markup'd as
+   <h1> just as inconsistently as the real game title is — this base rule gives them the
+   restrained "sub-panel title" treatment (bold condensed, no stencil font), and .game-title
+   below overrides it for the two actual "PERIMETER BREACH" headings specifically. */
 .panel h1 {
   margin: 0 0 6px;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--menu-text-0);
+}
+.panel h1.game-title {
+  font-family: var(--font-display);
+  font-weight: 400;
   font-size: 30px;
-  letter-spacing: 0.08em;
-  color: var(--accent);
-  text-shadow: 0 0 18px var(--accent-soft);
+  letter-spacing: 2px;
+  text-transform: none;
+  text-shadow: 0 0 18px rgba(232, 163, 61, 0.35);
 }
 .panel h2 {
   margin: 0 0 6px;
+  font-family: var(--font-body);
+  font-weight: 700;
   font-size: 22px;
-  color: var(--accent);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--menu-text-0);
+}
+/* #pause-title while dead and the full menu is toggled open (see main.js's updateDeathUI) — same
+   "Eliminated" red #respawn-title uses, so dying still reads as more alarming than a plain pause. */
+.panel h2.eliminated {
+  color: var(--danger);
+  text-shadow: 0 0 18px rgba(209, 69, 59, 0.4);
 }
 .subtitle {
   margin: 0 0 22px;
-  color: #a9c8d6;
-  font-size: 14px;
+  font-family: var(--font-mono);
+  color: var(--menu-text-1);
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
 .briefing {
@@ -647,14 +759,14 @@ body.touch-controls-active #touch-controls {
   text-align: left;
   font-size: 13.5px;
   line-height: 1.9;
-  color: #cfe9f4;
+  color: var(--menu-text-0);
 }
 .briefing li {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   padding: 6px 0;
 }
 .briefing b {
-  color: var(--accent);
+  color: var(--menu-amber);
 }
 .accent-highlight {
   color: var(--danger);
@@ -683,14 +795,14 @@ body.touch-controls-active #touch-controls {
   gap: 10px;
   margin: 0 0 26px;
   font-size: 14.5px;
-  color: #cfe9f4;
+  color: var(--menu-text-0);
   cursor: pointer;
   user-select: none;
 }
 .settings-row input[type="checkbox"] {
   width: 18px;
   height: 18px;
-  accent-color: var(--accent);
+  accent-color: var(--menu-amber);
   cursor: pointer;
 }
 
@@ -703,40 +815,57 @@ body.touch-controls-active #touch-controls {
 }
 .sensitivity-row input[type="range"] {
   flex: 1 1 auto;
-  accent-color: var(--accent);
+  accent-color: var(--menu-amber);
   cursor: pointer;
 }
 .sensitivity-value {
   flex: 0 0 34px;
   text-align: right;
-  color: #9fd6e8;
+  color: var(--menu-text-1);
   font-variant-numeric: tabular-nums;
 }
 
+/* Every button in the menu system: steel-gray gradient at rest with a thin amber left-edge
+   accent bar, full amber fill (dark text) on hover — deliberately uniform (a version of this
+   theme once reserved the amber fill for "primary" buttons only and it read as inconsistent).
+   `.primary-btn` (the main CTAs — Single Player, Multiplayer, Create Room, Browse Rooms) only
+   ever differs by a marginally thicker rest-state accent bar; hover is identical for every
+   button regardless. */
 button {
-  background: var(--accent);
-  color: #04222b;
-  border: none;
-  border-radius: 8px;
-  padding: 13px 30px;
+  position: relative;
+  background: linear-gradient(180deg, var(--menu-olive-dim), #202226);
+  color: var(--menu-text-0);
+  border: 1px solid var(--menu-panel-edge);
+  border-left: 3px solid var(--menu-amber);
+  border-radius: 0;
+  padding: 14px 18px;
+  font-family: var(--font-body);
   font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
   cursor: pointer;
-  transition: transform 0.1s ease, box-shadow 0.1s ease;
-  box-shadow: 0 0 24px var(--accent-soft);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  box-shadow: inset 0 0 0 1px rgba(232, 163, 61, 0.12);
 }
 button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 0 32px var(--accent-soft);
+  background: linear-gradient(180deg, var(--menu-amber), #c9821f);
+  color: #17140c;
+  border-left-color: var(--menu-amber-bright);
+  box-shadow: inset 0 0 0 1px rgba(232, 163, 61, 0.25);
+  transform: none;
 }
 button:active {
-  transform: translateY(0);
+  transform: none;
+}
+.primary-btn {
+  border-left-width: 4px;
 }
 
 #end-title.lose {
   color: var(--danger);
-  text-shadow: 0 0 18px rgba(255, 77, 94, 0.35);
+  text-shadow: 0 0 18px rgba(209, 69, 59, 0.4);
 }
 
 /* Multiplayer lobby screens */
@@ -748,28 +877,30 @@ button:active {
   text-align: left;
 }
 .form-row label {
+  font-family: var(--font-mono);
   font-size: 11px;
-  letter-spacing: 0.1em;
+  letter-spacing: 2px;
   text-transform: uppercase;
-  color: #9fd6e8;
-  opacity: 0.85;
+  color: var(--menu-olive);
 }
 .form-row input[type="text"],
 .form-row input[type="password"],
 .form-row input[type="number"] {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(77, 227, 255, 0.25);
-  border-radius: 6px;
-  padding: 10px 12px;
-  color: #e8f6ff;
+  background: #0e0f11;
+  border: 1px solid var(--menu-panel-edge);
+  border-left: 3px solid var(--menu-amber);
+  border-radius: 0;
+  padding: 12px 14px;
+  color: var(--menu-text-0);
   font-size: 14px;
-  font-family: inherit;
+  font-family: var(--font-body);
 }
 .form-row input[type="text"]:focus,
 .form-row input[type="password"]:focus,
 .form-row input[type="number"]:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--menu-amber);
+  box-shadow: 0 0 0 1px rgba(232, 163, 61, 0.4);
 }
 
 #match-config {
@@ -794,8 +925,7 @@ button:active {
 }
 .map-description {
   font-size: 12px;
-  color: #9fd6e8;
-  opacity: 0.8;
+  color: var(--menu-text-1);
   margin-top: 8px;
   min-height: 2.4em;
   line-height: 1.3;
@@ -811,25 +941,89 @@ button:active {
 }
 .class-description {
   font-size: 13px;
-  color: #9fd6e8;
-  opacity: 0.85;
+  color: var(--menu-text-1);
   margin: 10px 0 18px;
   min-height: 3em;
   line-height: 1.4;
+}
+
+.pause-version {
+  display: block;
+  margin-top: 18px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--menu-text-1);
+  letter-spacing: 1px;
+}
+
+/* The one deliberately-destructive button (the actual "Quit" confirm) — same steel-at-rest,
+   fill-on-hover shape every other button uses, just in the danger red instead of amber, so it
+   still reads as "this one is different" without reverting to the old always-solid-red look. */
+.danger-btn {
+  border-left-color: var(--danger);
+}
+.danger-btn:hover {
+  background: linear-gradient(180deg, var(--danger), #8f2c26);
+  color: #fdeceb;
+  border-left-color: var(--danger);
+  box-shadow: inset 0 0 0 1px rgba(209, 69, 59, 0.35);
+}
+
+/* A curtain over the (near-instant) reset/spawn work that happens the moment a fresh single-
+   player game or multiplayer match actually starts — purely cosmetic (there is no real load to
+   wait on), just enough of a pause to make "you are now entering the game" feel like a distinct
+   step rather than the menu silently snapping into gameplay. Sits above every other overlay
+   (including .app-version's z-index 50), and is NOT a .overlay itself since it needs to cover
+   the screen regardless of ctx.state, not toggle with menu navigation. */
+.loading-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  background: radial-gradient(ellipse at center, rgba(10, 20, 28, 0.75) 0%, rgba(2, 4, 6, 0.98) 100%);
+}
+.loading-screen.hidden {
+  display: none;
+}
+.loading-spinner {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 4px solid rgba(232, 163, 61, 0.35);
+  border-top-color: var(--menu-amber);
+  animation: loading-spin 0.9s linear infinite;
+}
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.loading-label {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--menu-amber);
+  font-size: 14px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  text-shadow: 0 0 18px rgba(232, 163, 61, 0.35);
 }
 
 .app-version {
   position: fixed;
   left: 10px;
   bottom: 8px;
-  color: var(--accent);
-  background: rgba(4, 10, 14, 0.75);
-  border: 1px solid var(--accent-soft);
-  border-radius: 6px;
+  font-family: var(--font-mono);
+  color: var(--menu-amber);
+  background: rgba(11, 12, 14, 0.85);
+  border: 1px solid var(--menu-panel-edge);
+  border-left: 3px solid var(--menu-amber);
   padding: 3px 8px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: 12px;
+  letter-spacing: 1px;
   pointer-events: none;
   /* .overlay (menus/landing) is z-index 10 with a near-opaque full-screen background —
      this needs to sit above every overlay, not just the bare canvas, or it's invisible
@@ -837,16 +1031,44 @@ button:active {
   z-index: 50;
 }
 
+/* A real <button>, so it would otherwise inherit the full menu button treatment (clip-path
+   notch, thick border, uppercase padding) from the bare `button` rule below — reset back to a
+   plain small corner chip matching .app-version's footprint instead. */
+.patch-notes-corner-btn {
+  position: fixed;
+  right: 10px;
+  bottom: 8px;
+  font-family: var(--font-mono);
+  color: var(--menu-amber);
+  background: rgba(11, 12, 14, 0.85);
+  border: 1px solid var(--menu-panel-edge);
+  border-right: 3px solid var(--menu-amber);
+  border-left: none;
+  clip-path: none;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 1px;
+  box-shadow: none;
+  z-index: 50; /* matches .app-version — needs to sit above every overlay, not just the bare canvas */
+}
+.patch-notes-corner-btn:hover {
+  background: rgba(232, 163, 61, 0.16);
+  color: var(--menu-amber-bright);
+  border-right-color: var(--menu-amber-bright);
+}
+
 .update-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent);
-  border-radius: 8px;
+  background: rgba(232, 163, 61, 0.08);
+  border: 1px solid var(--menu-panel-edge);
+  border-left: 3px solid var(--menu-amber);
   padding: 10px 14px;
   margin: 0 0 18px;
+  font-family: var(--font-body);
   font-size: 13px;
   text-align: left;
 }
@@ -858,7 +1080,7 @@ button:active {
   display: none;
 }
 .update-banner span {
-  color: #e8f6ff;
+  color: var(--menu-text-0);
 }
 .update-banner button {
   padding: 8px 16px;
@@ -867,10 +1089,44 @@ button:active {
 }
 
 .mp-error {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
   color: var(--danger);
-  font-size: 13px;
-  margin: -6px 0 16px;
+  background: rgba(209, 69, 59, 0.08);
+  border-left: 3px solid var(--danger);
+  padding: 8px 10px;
+  margin: -2px 0 16px;
   text-align: left;
+}
+
+.account-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin: 0 0 18px;
+}
+.account-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 6px;
+  background: var(--menu-olive-dim);
+  border: 1px solid var(--menu-panel-edge);
+}
+.account-stat span {
+  font-family: var(--font-display);
+  font-size: 22px;
+  color: var(--menu-amber);
+}
+.account-stat label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--menu-text-1);
 }
 
 .visibility-toggle {
@@ -879,17 +1135,58 @@ button:active {
 }
 .visibility-option {
   flex: 1;
-  background: rgba(255, 255, 255, 0.06);
-  color: #cfe9f4;
+  background: var(--menu-olive-dim);
+  color: var(--menu-text-0);
   box-shadow: none;
-  border: 1px solid rgba(77, 227, 255, 0.2);
+  border: 1px solid var(--menu-panel-edge);
   padding: 10px 14px;
   font-size: 13.5px;
 }
 .visibility-option.selected {
-  background: var(--accent);
-  color: #04222b;
-  box-shadow: 0 0 18px var(--accent-soft);
+  background: linear-gradient(180deg, var(--menu-amber), #c9821f);
+  color: #17140c;
+  box-shadow: inset 0 0 0 1px rgba(232, 163, 61, 0.25);
+}
+
+.patch-notes-tabs {
+  margin: 0 0 16px;
+}
+
+.patch-notes-list {
+  max-height: 420px;
+  overflow-y: auto;
+  text-align: left;
+  margin: 0 0 22px;
+  padding-right: 6px;
+}
+.patch-notes-entry {
+  margin: 0 0 20px;
+}
+.patch-notes-entry:last-child {
+  margin-bottom: 0;
+}
+.patch-notes-entry h2 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  color: var(--menu-amber);
+}
+.patch-notes-entry ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--menu-text-0);
+}
+.patch-notes-entry li {
+  padding: 4px 0 4px 18px;
+  position: relative;
+}
+.patch-notes-entry li::before {
+  content: "\2022";
+  position: absolute;
+  left: 2px;
+  color: var(--menu-amber);
 }
 
 .room-list {
@@ -901,35 +1198,39 @@ button:active {
   margin: 0 0 18px;
 }
 .room-list-empty {
-  color: #9fd6e8;
-  opacity: 0.7;
+  color: var(--menu-text-1);
   font-size: 13px;
   text-align: center;
   padding: 22px 0;
 }
+/* A real <button> (see lobbyUi.js's renderRoomList) — but a data row, not a call-to-action, so
+   the uppercase/clip-path/notch treatment every other menu button gets is reset back off here;
+   arbitrary player-entered room names shouldn't get forced uppercase or a diagonal corner cut. */
 .room-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   width: 100%;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(77, 227, 255, 0.18);
-  border-radius: 8px;
+  background: var(--menu-olive-dim);
+  border: 1px solid var(--menu-panel-edge);
+  clip-path: none;
   padding: 10px 14px;
-  color: #e8f6ff;
+  color: var(--menu-text-0);
   font-size: 14px;
   font-weight: 500;
   letter-spacing: normal;
+  text-transform: none;
   text-align: left;
   box-shadow: none;
 }
 .room-row:hover {
-  background: rgba(77, 227, 255, 0.12);
+  background: rgba(232, 163, 61, 0.12);
   transform: none;
   box-shadow: none;
+  color: var(--menu-text-0);
 }
 .room-row.selected {
-  border-color: var(--accent);
+  border-color: var(--menu-amber);
 }
 .room-row-name {
   display: flex;
@@ -941,8 +1242,7 @@ button:active {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--danger);
-  border: 1px solid rgba(255, 77, 94, 0.4);
-  border-radius: 4px;
+  border: 1px solid rgba(209, 69, 59, 0.4);
   padding: 1px 6px;
 }
 .room-row-count {
@@ -971,9 +1271,8 @@ button:active {
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--accent);
-  border: 1px solid rgba(77, 227, 255, 0.35);
-  border-radius: 4px;
+  color: var(--menu-amber);
+  border: 1px solid rgba(232, 163, 61, 0.4);
   padding: 1px 6px;
 }
 
@@ -981,7 +1280,10 @@ button:active {
 #respawn-overlay {
   position: absolute;
   inset: 0;
-  z-index: 7;
+  /* Above #touch-controls (8) — on a touch device the on-screen move/look zones cover the whole
+     screen and would otherwise intercept every tap before it reaches #respawn-btn, since a
+     player is still "in gameplay" (touch controls still rendered) while waiting to respawn. */
+  z-index: 9;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -999,12 +1301,18 @@ button:active {
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--danger);
-  text-shadow: 0 0 18px rgba(255, 77, 94, 0.4);
+  text-shadow: 0 0 18px rgba(209, 69, 59, 0.4);
   margin-bottom: 8px;
 }
-#respawn-timer {
-  font-size: 15px;
-  color: #cfe9f4;
+#respawn-btn {
+  margin-top: 12px;
+  pointer-events: auto; /* the overlay itself is pointer-events: none so clicks pass through elsewhere */
+}
+#respawn-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
 }
 
 #scoreboard-panel {

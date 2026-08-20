@@ -8,11 +8,8 @@ import { GRENADE_DEF, WEAPON_DEFS, CLASSES } from "./weaponDefs.js";
 import { Rocket } from "./projectiles.js";
 import { DEFAULT_MAP_ID } from "./world.js";
 import { formatGrenadeCount } from "./hud.js";
-import { loadPlayerName } from "./lobbyUi.js";
-import { SHIELD_DURATION, MINE_BLAST_RADIUS } from "./abilities.js";
-
-const RESPAWN_DELAY = 3;
-const INVINCIBLE_DURATION = 3;
+import { MINE_BLAST_RADIUS } from "./abilities.js";
+import { RESPAWN_DELAY, INVINCIBLE_DURATION, ABILITY_DURATIONS } from "../../shared/abilityConstants.js";
 
 // Single-player reset/respawn, the whole multiplayer match lifecycle (start/spawn/damage/
 // respawn/elim/end/disconnect), and the network relay handler that ties incoming peer
@@ -51,6 +48,8 @@ export function createMatchLifecycle(ctx) {
     ctx.player.stamina = STAMINA_MAX * ctx.player.staminaMult;
     ctx.player.staminaLocked = false;
     ctx.leftMouseHeld = false;
+    ctx.burstShotsQueued = 0; // a fresh life starts clean, not mid-burst from whatever the last one was doing
+    ctx.burstCooldownRemaining = 0;
     ctx.controls.pointerSpeed = ctx.settings.lookSensitivity;
     el.scopeVignette.classList.add("hidden");
 
@@ -59,8 +58,9 @@ export function createMatchLifecycle(ctx) {
 
     ctx.grenadeCount = ctx.INFINITE_GRENADES ? Infinity : GRENADE_DEF.count;
     ctx.grenadeCooldown = 0;
-    ctx.abilityCooldownRemaining = 0; // fresh life, ability immediately available again — matches the full-ammo reset above
-    ctx.invisibleTimer = 0; // fresh life starts visible regardless of how the last one ended
+    ctx.abilityCooldownUntil = 0; // fresh life, ability immediately available again — matches the full-ammo reset above
+    ctx.invisibleUntil = 0; // fresh life starts visible regardless of how the last one ended
+    ctx.overclockUntil = 0; // fresh life, no leftover buff from the last one
     el.grenadeCount.textContent = formatGrenadeCount(ctx.grenadeCount);
     for (const g of ctx.grenades) g.destroy();
     ctx.grenades.length = 0;
@@ -68,29 +68,118 @@ export function createMatchLifecycle(ctx) {
     ctx.rockets.length = 0;
   }
 
-  function resetGame() {
-    ctx.kills = 0;
-    el.kills.textContent = `0 / ${ctx.TOTAL_KILLS_TO_WIN}`;
-    resetPlayerState(0, 8);
-
+  // Every gameplay-only Three.js object that isn't the base map/world itself, torn down in one
+  // place — shared by startSession() below and endSession() further down. Previously five
+  // different "leave/end a match" code paths each cleared a different subset of this (see the
+  // gap-matrix in the menu/gameplay-separation plan this replaces); this is what makes it
+  // structurally impossible for a leftover corpse/grenade/shield/enemy to still be sitting in
+  // the scene under the menu's flyover camera after any of them.
+  function clearGameplayObjects() {
     for (const e of ctx.enemies) e.die(ctx.scene);
     ctx.enemies.length = 0;
     ctx.pendingSpawns.length = 0;
     for (const p of ctx.corpseParts) if (p.mesh.parent) p.mesh.parent.remove(p.mesh);
     ctx.corpseParts.length = 0;
+    for (const g of ctx.grenades) g.destroy();
+    ctx.grenades.length = 0;
+    for (const r of ctx.rockets) r.destroy();
+    ctx.rockets.length = 0;
+    for (const r of ctx.remoteRockets) r.destroy();
+    ctx.remoteRockets.length = 0;
     ctx.abilities.clearAllAbilityEffects();
-    for (let i = 0; i < 3; i++) spawnEnemy();
   }
 
-  function setInvincible(seconds) {
-    ctx.invincibleTimer = seconds;
+  // The one authoritative way to begin either a fresh single-player round or a multiplayer
+  // match — replaces the old resetGame()/beginMatch() pair, which did overlapping but not
+  // identical resets (only resetGame ever cleared grenades/rockets up front, for instance).
+  // Always does the full shared reset first, then branches only on what's genuinely different
+  // between the two modes.
+  function startSession({ mode, config }) {
+    ctx.respawnAt = 0;
+    ctx.pendingInvincibleUntil = 0;
+    ctx.deadPauseMenuOpen = false;
+    el.respawnOverlay.classList.add("hidden");
+    endDeathRagdoll();
+    clearInvincible();
+    el.scoreboardPanel.classList.add("hidden");
+    ctx.scoreboardVisible = false;
+    clearGameplayObjects(); // abilities must clear before loadMap() below re-points obstacles/obstacleMeshes at the new map's fresh arrays
+
+    if (mode === "multiplayer") {
+      ctx.matchConfig = config;
+      ctx.inMatch = true;
+      ctx.loadMap(config.mapId || DEFAULT_MAP_ID);
+
+      for (const rp of ctx.remotePlayers.values()) rp.destroy(ctx.scene);
+      ctx.remotePlayers.clear();
+      ctx.remoteEffectUntil.clear();
+      ctx.scores.clear();
+
+      let idx = 0;
+      for (const p of ctx.currentPlayers) {
+        ctx.scores.set(p.id, { name: p.name, kills: 0 });
+        if (p.id !== ctx.myPlayerId) {
+          const { x, z } = randomSpawnPoint(12, ctx.world.arenaBound);
+          ctx.remotePlayers.set(p.id, new RemotePlayer(ctx.scene, p.id, p.name, idx, x, z));
+        }
+        idx++;
+      }
+      ctx.hud.renderScoreboard();
+      ctx.hud.updateKillsHud();
+
+      ctx.lobbyUi.showMpScreen(null);
+      ctx.sounds.resume();
+      ctx.loadout.setForceHidden(false);
+      // Class-select comes before the local player actually spawns in — keeps showMenuBackdrop/
+      // HUD as they are (menu flyover, no HUD yet) until spawnIntoMatch() actually places them.
+      ctx.showClassSelect(true);
+    } else {
+      ctx.kills = 0;
+      el.kills.textContent = `0 / ${ctx.TOTAL_KILLS_TO_WIN}`;
+      resetPlayerState(0, 8);
+      for (let i = 0; i < 3; i++) spawnEnemy();
+    }
+  }
+
+  // The one authoritative way to leave a session, for any reason — win, single-player exit-to-
+  // menu or death, leaving to the room, or an abrupt disconnect. Unconditionally tears down
+  // every gameplay-only object/timer every time; callers only need to handle their own
+  // reason-specific UI afterward (which screen to show, what messages to set). `nextState` is
+  // applied *before* `controls.unlock()` below fires its "unlock" event, the same ordering
+  // trick the old endMatch()/endGame() each separately remembered to get right — now guaranteed
+  // in the one place that actually calls unlock().
+  function endSession(nextState = "menu") {
+    ctx.state = nextState;
+    ctx.inMatch = false;
+    ctx.respawnAt = 0;
+    ctx.pendingInvincibleUntil = 0;
+    ctx.deadPauseMenuOpen = false;
+    el.respawnOverlay.classList.add("hidden");
+    endDeathRagdoll();
+    clearInvincible();
+    el.scoreboardPanel.classList.add("hidden");
+    ctx.scoreboardVisible = false;
+    clearGameplayObjects();
+
+    for (const rp of ctx.remotePlayers.values()) rp.destroy(ctx.scene);
+    ctx.remotePlayers.clear();
+    ctx.remoteEffectUntil.clear();
+
+    ctx.matchConfig = null;
+
+    ctx.controls.unlock();
+    ctx.hud.hideGameplayUI();
+  }
+
+  function setInvincible(until) {
+    ctx.invincibleUntil = until;
     el.invincibleVignette.classList.remove("hidden");
     el.invincibleIndicator.classList.remove("hidden");
-    el.invincibleTimerEl.textContent = `${Math.ceil(ctx.invincibleTimer)}s`;
+    el.invincibleTimerEl.textContent = `${Math.max(0, Math.ceil((until - Date.now()) / 1000))}s`;
   }
 
   function clearInvincible() {
-    ctx.invincibleTimer = 0;
+    ctx.invincibleUntil = 0;
     el.invincibleVignette.classList.add("hidden");
     el.invincibleIndicator.classList.add("hidden");
   }
@@ -133,70 +222,21 @@ export function createMatchLifecycle(ctx) {
     ctx.loadout.setForceHidden(false);
   }
 
-  // Called once from the animate() loop the instant respawnTimer counts down to zero — a
-  // fresh spawn point, full reset, overlay dismissed, and the post-respawn invincibility
-  // window started.
+  // Called once the player clicks the Respawn button (see main.js) once eligible — a fresh spawn
+  // point, full reset, pause-hint's death UI dismissed, and the post-respawn invincibility window
+  // started.
   function respawnNow() {
+    // An absolute timestamp, unlike the old countdown, doesn't naturally go permanently-false
+    // once it's passed — without this explicit reset, respawnAt would stay "in the past" forever.
+    ctx.respawnAt = 0;
     const spawn = randomSpawnPoint(12, ctx.world.arenaBound);
     resetPlayerState(spawn.x, spawn.z);
-    el.respawnOverlay.classList.add("hidden");
     endDeathRagdoll();
-    setInvincible(INVINCIBLE_DURATION);
-  }
-
-  // Fires for every client, including the host — the server broadcasts match_started to
-  // the whole room rather than skipping the sender, so nobody needs special-case logic.
-  function beginMatch(config, startedAt) {
-    ctx.matchConfig = config;
-    ctx.matchStartedAt = startedAt;
-    ctx.inMatch = true;
-    ctx.respawnTimer = 0;
-    // Before loadMap() reassigns obstacles/obstacleMeshes to the new map's fresh arrays — a
-    // shield left over from a previous match (or an exited single-player round) needs its
-    // splice-out to happen against the *old* arrays it was actually pushed into, not silently
-    // no-op against arrays that already forgot it existed. Its visual mesh would otherwise also
-    // just leak in the scene forever, since shields/mines live outside buildWorld's own dispose().
-    ctx.abilities.clearAllAbilityEffects();
-    ctx.loadMap(config.mapId || DEFAULT_MAP_ID);
-    el.respawnOverlay.classList.add("hidden");
-    endDeathRagdoll();
-    clearInvincible();
-
-    // Multiplayer never has AI hostiles at all — but if a single-player round was left
-    // mid-game (exited without ever calling resetGame(), which is the only thing that
-    // normally clears these), enemies/pendingSpawns/their corpses would otherwise still be
-    // sitting here and the animate loop would keep them fighting the player right through a
-    // "multiplayer" match. Defensive, not just reactive: also enforced by the `!inMatch`
-    // gate around the enemy update/spawn logic itself, so this holds even if some other path
-    // ever leaves stale enemies around too.
-    for (const e of ctx.enemies) e.die(ctx.scene);
-    ctx.enemies.length = 0;
-    ctx.pendingSpawns.length = 0;
-    for (const p of ctx.corpseParts) if (p.mesh.parent) p.mesh.parent.remove(p.mesh);
-    ctx.corpseParts.length = 0;
-
-    for (const rp of ctx.remotePlayers.values()) rp.destroy(ctx.scene);
-    ctx.remotePlayers.clear();
-    ctx.scores.clear();
-
-    let idx = 0;
-    for (const p of ctx.currentPlayers) {
-      ctx.scores.set(p.id, { name: p.name, kills: 0 });
-      if (p.id !== ctx.myPlayerId) {
-        const { x, z } = randomSpawnPoint(12, ctx.world.arenaBound);
-        ctx.remotePlayers.set(p.id, new RemotePlayer(ctx.scene, p.id, p.name, idx, x, z));
-      }
-      idx++;
-    }
-    ctx.hud.renderScoreboard();
-    ctx.hud.updateKillsHud();
-
-    ctx.lobbyUi.showMpScreen(null);
-    ctx.sounds.resume();
-    ctx.loadout.setForceHidden(false);
-    // Class-select comes before the local player actually spawns in — keeps showMenuBackdrop/
-    // HUD as they are (menu flyover, no HUD yet) until spawnIntoMatch() actually places them.
-    ctx.showClassSelect(true);
+    // pendingInvincibleUntil is the server's own timestamp (see handleRespawnScheduled) — the
+    // fallback only covers the (should-be-rare) case where this fires before that broadcast has
+    // arrived yet.
+    setInvincible(ctx.pendingInvincibleUntil || Date.now() + INVINCIBLE_DURATION * 1000);
+    ctx.pendingInvincibleUntil = 0;
   }
 
   // Actually places the LOCAL player into the match world — a fresh spawn point, full health/
@@ -206,48 +246,66 @@ export function createMatchLifecycle(ctx) {
   function spawnIntoMatch() {
     ctx.showMenuBackdrop = false;
     ctx.hud.showGameplayUI();
+    // Harmless when already 0 (the common case) — but Change Class is reachable while dead too
+    // (main.js's Spawn In handler blocks it until the respawn timer actually passes, same as the
+    // dedicated Respawn button), and once it does, picking a class and spawning in this way *is*
+    // a real respawn, so the death UI needs to actually clear rather than keep showing over a
+    // now-alive player.
+    ctx.respawnAt = 0;
+    // Same reasoning — if this respawn came from a death (Change Class after dying), the ragdoll
+    // view left ctx.controls.enabled=false and the weapon force-hidden (see beginDeathRagdoll).
+    // respawnNow() already cleans this up for the dedicated Respawn button; this path needs the
+    // exact same cleanup, or the player ends up alive but permanently unable to look around.
+    endDeathRagdoll();
     const spawn = randomSpawnPoint(12, ctx.world.arenaBound);
     resetPlayerState(spawn.x, spawn.z);
     ctx.posBroadcastAccum = 0;
     ctx.requestPlayLock();
-  }
-
-  // Applies damage to the LOCAL player only — never touches anyone else's health. A hit
-  // on a remote player instead sends *them* a message (see fireWeapon/explodeAt) and lets
-  // their own client decide what happens, same trust model as the rest of this game.
-  // `blast`, when given as {origin:{x,y,z}, strength}, is what makes an eliminated player's
-  // avatar (as their peers see it) scatter apart hard from an explosive kill instead of the
-  // plain-gunshot collapse — the same distinction Enemy/registerKill already makes.
-  function damageLocalPlayer(amount, killerId, killerName, blast = null) {
-    if (!ctx.inMatch || ctx.respawnTimer > 0 || ctx.invincibleTimer > 0) return;
-    ctx.player.takeDamage(amount);
-    ctx.vfx.flashHit();
-    if (ctx.player.health <= 0) startRespawnSequence(killerId, killerName, blast);
+    // (Re)registers this player's server-side combat ledger (health/ammo/grenades) for the class
+    // just spawned into — see server/index.js's handleSpawnReady. Single-player has no lobby.
+    if (ctx.inMatch && ctx.lobby) ctx.lobby.spawnReady(ctx.selectedClassId);
   }
 
   function startRespawnSequence(killerId, killerName, blast = null) {
-    ctx.respawnTimer = RESPAWN_DELAY;
-    ctx.invisibleTimer = 0; // dying cancels Invisibility immediately, even mid-duration
-    el.respawnTitle.textContent = killerId ? `Eliminated by ${killerName}` : "Eliminated";
-    el.respawnOverlay.classList.remove("hidden");
+    ctx.respawnAt = Date.now() + RESPAWN_DELAY * 1000;
+    ctx.invisibleUntil = 0; // dying cancels Invisibility immediately, even mid-duration
+    ctx.overclockUntil = 0; // dying cancels Overclock immediately, even mid-duration
+    ctx.eliminatedMessage = killerId ? `Eliminated by ${killerName}` : "Eliminated";
+    // Always starts on the minimal respawn screen, not the full pause menu — Esc/the touch pause
+    // button toggles over to that (see main.js's handlePauseToggle) and back again.
+    ctx.deadPauseMenuOpen = false;
     beginDeathRagdoll(blast);
-
-    const myName = loadPlayerName();
-    if (ctx.lobby) ctx.lobby.relayToRoom({ t: "elim", victimId: ctx.myPlayerId, victimName: myName, killerId, killerName, blast });
-    applyElim(ctx.myPlayerId, myName, killerId, killerName, blast); // tally locally too, symmetric with how peers see it
+    // Releases the real OS pointer lock so the respawn overlay's button is actually clickable —
+    // this fires the same "unlock" listener a real Escape press would, but enterPausedState()
+    // there explicitly ignores it while ctx.respawnAt is set, since death has its own separate UI.
+    ctx.controls.unlock();
+    ctx.updateDeathUI(); // immediate correctness — don't wait for the next animate() frame
+    // The scoreboard tally (and, for a peer, their ragdoll) is no longer applied directly from
+    // here — it now happens uniformly for every player's death (including this one) via
+    // handleRespawnScheduled, reacting to the server's own respawn_scheduled broadcast, which
+    // arrives moments after this purely-local/visual death UI already ran.
   }
 
-  // Every client tallies the same broadcast "elim" events independently — there's no
-  // single scorekeeper. Fine for this scope; near-simultaneous kills could in principle
-  // land in a slightly different order per client (documented v1 simplification).
+  // Every client applies the same server-broadcast elimination the same way — see
+  // handleRespawnScheduled below, the sole trigger for this now (both for this player's own
+  // death and a peer's).
   function applyElim(victimId, victimName, killerId, killerName, blast = null) {
     if (!ctx.scores.has(victimId)) ctx.scores.set(victimId, { name: victimName, kills: 0 });
     if (killerId && killerId !== victimId) {
       if (!ctx.scores.has(killerId)) ctx.scores.set(killerId, { name: killerName, kills: 0 });
       ctx.scores.get(killerId).kills++;
+    } else {
+      // A suicide — either no killerId at all, or a self-targeted hit (own grenade/rocket/mine
+      // splash, killerId === victimId) — costs the victim a kill rather than just denying credit
+      // to nobody, same "own goal" convention most shooters use. Allowed to go negative — that's
+      // the whole point of the penalty.
+      ctx.scores.get(victimId).kills--;
     }
     ctx.hud.renderScoreboard();
-    if (killerId === ctx.myPlayerId) ctx.hud.updateKillsHud();
+    // The suicide branch above changes the local player's own tally with no killerId to key
+    // off of, so the usual "only the killer's client refreshes its own kills HUD" check needs
+    // a second condition to still catch that case.
+    if (killerId === ctx.myPlayerId || (!killerId && victimId === ctx.myPlayerId)) ctx.hud.updateKillsHud();
 
     // "Explode" the eliminated player's avatar the same way an AI enemy dies — only ever
     // meaningful for a peer (there's no RemotePlayer standing in for the local client itself).
@@ -260,10 +318,11 @@ export function createMatchLifecycle(ctx) {
       ctx.remotePlayers.delete(victimId); // recreated lazily off that player's next "pos" tick post-respawn
     }
 
-    if (ctx.matchConfig?.mode === "killTarget" && killerId) {
-      const killer = ctx.scores.get(killerId);
-      if (killer.kills >= ctx.matchConfig.target) endMatch(killerId);
-    }
+    // Deciding the match is over is the server's job (it tallies the same elimination this
+    // function is reacting to, and broadcasts "match_ended" once a kill-target/time-limit is hit
+    // — see server/index.js's recordElim/finalizeMatch and lobbyUi.js's onMatchEnded). ctx.scores
+    // here stays purely a local, cosmetic scoreboard display, not the source of truth for ending
+    // anything.
   }
 
   function handleRelay(from, payload) {
@@ -279,78 +338,24 @@ export function createMatchLifecycle(ctx) {
           rp = new RemotePlayer(ctx.scene, from, info?.name || "Player", idx, payload.x, payload.z);
           ctx.remotePlayers.set(from, rp);
         }
-        rp.updateFromNetwork(
-          payload.x,
-          payload.y,
-          payload.z,
-          payload.rotY,
-          payload.health,
-          payload.isMoving,
-          payload.weaponId,
-          payload.pitch,
-          payload.invincible,
-          payload.invisible
-        );
+        // health no longer rides on a position tick (see handleDamageApplied/handlePlayerSpawned)
+        // — the server is the sole source of health now, never a self-report.
+        rp.updateFromNetwork(payload.x, payload.y, payload.z, payload.rotY, payload.isMoving, payload.weaponId, payload.pitch);
         break;
       }
-      case "hit":
-        damageLocalPlayer(payload.damage, payload.fromId, payload.fromName, payload.blast);
-        break;
-      case "elim":
-        applyElim(payload.victimId, payload.victimName, payload.killerId, payload.killerName, payload.blast);
-        break;
       case "left_match": {
         const rp = ctx.remotePlayers.get(from);
         if (rp) {
           rp.destroy(ctx.scene);
           ctx.remotePlayers.delete(from);
         }
+        ctx.remoteEffectUntil.delete(from);
         break;
       }
-      case "fire": {
-        // A plain visual/audio echo of someone else's shot — no damage authority here
-        // (that's still only ever decided by whoever actually gets hit, via "hit" above).
-        const rp = ctx.remotePlayers.get(from);
-        if (!rp) break;
-        const def = WEAPON_DEFS.find((d) => d.id === payload.weaponId);
-        if (!def) break;
-
-        rp.setWeapon(payload.weaponId);
-        rp.triggerMuzzleFlash();
-        ctx.sounds.play(`fire_${def.id}`, { volume: 0.55, rate: 0.98 + Math.random() * 0.04 });
-
-        const muzzleWorld = rp.getMuzzleWorldPosition(new THREE.Vector3());
-        const hitVec = new THREE.Vector3(payload.hitPoint.x, payload.hitPoint.y, payload.hitPoint.z);
-        if (def.hitscan) {
-          // Same "no tracer for a knife" treatment as the shooter's own client (combat.js).
-          if (!def.melee) ctx.vfx.bolt(muzzleWorld, hitVec, payload.hitPlayer ? 0x4de3ff : 0x8a8172);
-          ctx.vfx.sparkBurst(hitVec, payload.hitPlayer ? 0x9be9ff : 0xbfae8a);
-        } else {
-          const rocket = new Rocket(ctx.scene, muzzleWorld, hitVec, def.projectileSpeed);
-          rocket.splashRadius = def.splashRadius;
-          ctx.remoteRockets.push(rocket);
-        }
-        break;
-      }
-      // `from` (the server-verified sender id), not payload.ownerId, is used as the owner for
-      // both of these — no reason to trust a self-reported field when the relay already hands
-      // us the real one for free.
-      case "shield_place":
-        if (!ctx.abilities.activeShields.has(payload.id)) {
-          ctx.abilities.spawnLocalShield(payload.id, payload.x, payload.z, payload.rotY, from, payload.duration ?? SHIELD_DURATION);
-        }
-        break;
-      case "shield_remove":
-        ctx.abilities.despawnLocalShield(payload.id);
-        break;
-      case "mine_place":
-        if (!ctx.abilities.activeMines.has(payload.id)) ctx.abilities.spawnLocalMine(payload.id, payload.x, payload.z, from);
-        break;
       case "mine_explode": {
         // Visual/audio echo only — never deals damage here. If this hit *me*, the owner's own
-        // client already decided that independently (via explodeAt's splashDamagePlayer check
-        // against every RemotePlayer it knows about, same as any other explosion) and sent me a
-        // separate "hit" relay_to_player message for it, same as the "fire" case above.
+        // client already reported that to the server (see combat.js's explodeAt) and I'll learn
+        // the result via handleDamageApplied, same as any other explosion.
         const m = ctx.abilities.activeMines.get(payload.id);
         if (m) ctx.combat.explodeVisualOnly(new THREE.Vector3(m.x, 0.15, m.z), MINE_BLAST_RADIUS);
         ctx.abilities.despawnLocalMine(payload.id);
@@ -359,35 +364,137 @@ export function createMatchLifecycle(ctx) {
     }
   }
 
-  function endMatch(winnerId) {
-    ctx.inMatch = false;
-    ctx.state = "menu"; // set before unlock() so the pause-hint doesn't pop up, same trick endGame() uses
-    ctx.controls.unlock();
-    ctx.hud.hideGameplayUI();
-    el.respawnOverlay.classList.add("hidden");
-    el.scoreboardPanel.classList.add("hidden");
-    ctx.scoreboardVisible = false;
-    // Defensive: the match can end (another player hit the kill target, or time ran out) while
-    // this player is still on the class-select screen, never having spawned in at all.
-    el.classSelectScreen.classList.add("hidden");
-    ctx.abilities.clearAllAbilityEffects();
+  // A plain visual/audio echo of a peer's shot — the server already validated it (ammo/fire-rate)
+  // before broadcasting this, and damage (if any) arrives separately via handleDamageApplied, so
+  // there's no authority decided here at all, same as the old client-decided "fire" relay this
+  // replaces. Own shots are already fully handled locally in combat.js's fireWeapon(); `rp` is
+  // naturally absent for the local player's own id (never present in ctx.remotePlayers), so this
+  // silently no-ops for the self-echo without needing a separate check.
+  function handleFireConfirmed(from, payload) {
+    const rp = ctx.remotePlayers.get(from);
+    if (!rp) return;
+    const def = WEAPON_DEFS.find((d) => d.id === payload.weaponId);
+    if (!def) return;
 
+    rp.setWeapon(payload.weaponId);
+    rp.triggerMuzzleFlash();
+    ctx.sounds.play(`fire_${def.soundId ?? def.id}`, { volume: 0.55, rate: 0.98 + Math.random() * 0.04 });
+
+    const muzzleWorld = rp.getMuzzleWorldPosition(new THREE.Vector3());
+    const hitVec = new THREE.Vector3(payload.hitPoint.x, payload.hitPoint.y, payload.hitPoint.z);
+    if (def.hitscan) {
+      // Same "no tracer for a knife" treatment as the shooter's own client (combat.js).
+      if (!def.melee) ctx.vfx.bolt(muzzleWorld, hitVec, payload.hitPlayer ? 0x4de3ff : 0x8a8172);
+      ctx.vfx.sparkBurst(hitVec, payload.hitPlayer ? 0x9be9ff : 0xbfae8a);
+    } else {
+      const rocket = new Rocket(ctx.scene, muzzleWorld, hitVec, def.projectileSpeed);
+      rocket.splashRadius = def.splashRadius;
+      ctx.remoteRockets.push(rocket);
+    }
+  }
+
+  // A player's combat ledger (and therefore health) was just (re)registered server-side for a
+  // fresh spawn — see server/index.js's handleSpawnReady. The local player's own health/UI
+  // already reset synchronously in resetPlayerState; this only matters for resetting a peer's
+  // health bar to full at the same moment, replacing the old implicit reset via a self-reported
+  // pos.health field.
+  function handlePlayerSpawned(playerId, maxHealth) {
+    if (playerId === ctx.myPlayerId) return;
+    const rp = ctx.remotePlayers.get(playerId);
+    if (rp) {
+      rp.maxHealth = maxHealth;
+      rp.health = maxHealth;
+    }
+  }
+
+  // Health/damage authority — the server computed and applied this already (see
+  // server/index.js's handleReportHit); every recipient just reflects the result, never decides
+  // it. This is what closes the old god-mode gap: the local player's own health is no longer
+  // something this client can simply choose to ignore.
+  function handleDamageApplied({ targetId, fromId, fromName, newHealth, blast }) {
+    if (targetId === ctx.myPlayerId) {
+      ctx.player.health = newHealth;
+      ctx.player.timeSinceDamage = 0; // keeps the local passive-regen delay in sync with the server's own
+      ctx.vfx.flashHit();
+      if (newHealth <= 0) startRespawnSequence(fromId, fromName, blast);
+      return;
+    }
+    const rp = ctx.remotePlayers.get(targetId);
+    if (rp) rp.health = newHealth;
+  }
+
+  // A top-level message (not a `relay` envelope) — the server validated this activation and
+  // computed `until` itself (see server/index.js's handleUseAbility), so every recipient
+  // (including the actor, reconciling its own optimistic local estimate) treats it as
+  // authoritative. `from` is the server-verified sender id, not a self-reported field.
+  function handleAbilityUsed(from, abilityId, payload) {
+    const { id, x, z, rotY, until } = payload;
+    if (abilityId === "overclock") {
+      // Self-only — a peer never renders or reacts to Overclock in any way, so only the actor's
+      // own optimistic estimate needs reconciling against the server-issued timestamp.
+      if (from === ctx.myPlayerId) ctx.overclockUntil = until;
+      return;
+    }
+    if (abilityId === "invisibility") {
+      if (from === ctx.myPlayerId) {
+        ctx.invisibleUntil = until;
+      } else {
+        const entry = ctx.remoteEffectUntil.get(from) || {};
+        entry.invisibleUntil = until;
+        ctx.remoteEffectUntil.set(from, entry);
+      }
+      return;
+    }
+    const store = abilityId === "shield" ? ctx.abilities.activeShields : abilityId === "mine" ? ctx.abilities.activeMines : null;
+    if (!store) return;
+    const existing = store.get(id);
+    if (existing) {
+      existing.until = until; // owner's own optimistic copy — just correct the timing
+      return;
+    }
+    if (abilityId === "shield") ctx.abilities.spawnLocalShield(id, x, z, rotY, from, until);
+    else ctx.abilities.spawnLocalMine(id, x, z, from, until);
+  }
+
+  // The server computes and broadcasts this the instant recordElim runs (see server/index.js),
+  // itself triggered only by the server's own detection of a tracked health value reaching 0
+  // (handleReportHit) — no client self-report of any kind is trusted here anymore, for the
+  // respawn timing OR for who-killed-whom. This is the single trigger for applyElim now, for
+  // both this player's own death and a peer's.
+  function handleRespawnScheduled({ victimId, victimName, killerId, killerName, blast, respawnAt, invincibleUntil }) {
+    if (victimId === ctx.myPlayerId) {
+      ctx.respawnAt = respawnAt; // reconciles the optimistic estimate startRespawnSequence already set
+      ctx.pendingInvincibleUntil = invincibleUntil; // applied by respawnNow() at the actual moment of respawn
+    } else {
+      const entry = ctx.remoteEffectUntil.get(victimId) || {};
+      entry.invincibleUntil = invincibleUntil;
+      ctx.remoteEffectUntil.set(victimId, entry);
+    }
+    applyElim(victimId, victimName, killerId, killerName, blast);
+  }
+
+  function endMatch(winnerId) {
+    // Read before endSession() below zeroes ctx.matchConfig — scores itself is deliberately
+    // left alone by endSession (unlike matchConfig), since the end screen still needs it.
     const winnerName = winnerId ? ctx.scores.get(winnerId)?.name ?? "Someone" : null;
+    const message = winnerId ? `First to ${ctx.matchConfig.target} eliminations.` : "Final scoreboard:";
+
+    endSession("menu");
+
     el.endTitle.classList.remove("lose");
     el.endTitle.textContent = winnerId ? (winnerId === ctx.myPlayerId ? "You Win!" : `${winnerName} Wins!`) : "Time's Up";
-    el.endMessage.textContent = winnerId ? `First to ${ctx.matchConfig.target} eliminations.` : "Final scoreboard:";
+    el.endMessage.textContent = message;
     ctx.hud.renderEndScoreboard();
     el.endScoreboardList.classList.remove("hidden");
     el.restartBtn.classList.add("hidden");
     el.backToRoomBtn.classList.remove("hidden");
-    el.endScreen.classList.remove("hidden");
-
-    for (const rp of ctx.remotePlayers.values()) rp.destroy(ctx.scene);
-    ctx.remotePlayers.clear();
+    // Also covers the case where the match ends (kill target hit / time ran out) while this
+    // player was still on the class-select screen, never having spawned in at all — showScreen
+    // hides whatever was open, not just a specifically-anticipated one.
+    ctx.screens.showScreen(el.endScreen);
   }
 
   el.backToRoomBtn.addEventListener("click", () => {
-    el.endScreen.classList.add("hidden");
     el.endScoreboardList.classList.add("hidden");
     el.restartBtn.classList.remove("hidden");
     el.backToRoomBtn.classList.add("hidden");
@@ -400,23 +507,8 @@ export function createMatchLifecycle(ctx) {
   // Leaving mid-match via the pause menu — stays connected to the room/lobby (unlike
   // leaving the room entirely), so the group can start another match right after.
   function leaveMatchToRoom() {
-    // Its only current caller (el.exitToMenuBtn's handler in main.js) already sets `state`
-    // first, but relying on that precondition is fragile — leaving it unset here means
-    // `state` stays "playing" for anyone who calls this directly, which leaves the global
-    // mousedown/mouseup listeners still treating clicks as in-game fire input instead of
-    // ordinary page clicks.
-    ctx.state = "menu";
-    ctx.inMatch = false;
-    ctx.respawnTimer = 0;
-    el.respawnOverlay.classList.add("hidden");
-    endDeathRagdoll();
-    clearInvincible();
-    el.scoreboardPanel.classList.add("hidden");
-    ctx.scoreboardVisible = false;
+    endSession("menu");
     if (ctx.lobby) ctx.lobby.relayToRoom({ t: "left_match", id: ctx.myPlayerId });
-    for (const rp of ctx.remotePlayers.values()) rp.destroy(ctx.scene);
-    ctx.remotePlayers.clear();
-    ctx.abilities.clearAllAbilityEffects();
     ctx.lobbyUi.renderRoomScreen();
     ctx.lobbyUi.showMpScreen(el.roomScreen);
   }
@@ -424,44 +516,32 @@ export function createMatchLifecycle(ctx) {
   // Disconnect mid-match (server dropped / network blip) — clean up game state only;
   // the onDisconnected handler that called this is the one showing the error/screen.
   function endMatchAbruptly() {
-    ctx.inMatch = false;
-    ctx.respawnTimer = 0;
-    el.respawnOverlay.classList.add("hidden");
-    endDeathRagdoll();
-    clearInvincible();
-    el.scoreboardPanel.classList.add("hidden");
-    ctx.scoreboardVisible = false;
-    ctx.state = "menu";
-    ctx.controls.unlock();
+    endSession("menu");
     ctx.showMenuBackdrop = true;
     ctx.loadout.setForceHidden(true);
-    ctx.hud.hideGameplayUI();
-    // Defensive: a disconnect could land while the class-select screen is up (match started,
-    // but the player hadn't hit Spawn In yet) — showMpScreen only manages the lobby screens,
-    // not this one, so it'd otherwise be left showing on top of whatever comes next.
-    el.classSelectScreen.classList.add("hidden");
-    for (const rp of ctx.remotePlayers.values()) rp.destroy(ctx.scene);
-    ctx.remotePlayers.clear();
-    ctx.abilities.clearAllAbilityEffects();
   }
 
   return {
     spawnEnemy,
     resetPlayerState,
-    resetGame,
+    startSession,
+    endSession,
     setInvincible,
     clearInvincible,
     beginDeathRagdoll,
     endDeathRagdoll,
     respawnNow,
-    beginMatch,
     spawnIntoMatch,
-    damageLocalPlayer,
     startRespawnSequence,
     applyElim,
     handleRelay,
+    handleFireConfirmed,
+    handlePlayerSpawned,
+    handleDamageApplied,
     endMatch,
     leaveMatchToRoom,
     endMatchAbruptly,
+    handleAbilityUsed,
+    handleRespawnScheduled,
   };
 }

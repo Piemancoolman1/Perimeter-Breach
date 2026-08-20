@@ -31,8 +31,8 @@ export function createHud(ctx) {
     el.grenadeCount.textContent = formatGrenadeCount(ctx.grenadeCount);
 
     // Continuous gradient, not a discrete on/off — recomputed every frame straight from current
-    // health, so it needs no explicit set/clear calls anywhere (unlike invincibleTimer's vignette,
-    // which is a timed state): healing/respawning fades it back out automatically.
+    // health, so it needs no explicit set/clear calls anywhere (unlike invincibleUntil's
+    // vignette, which is a timed state): healing/respawning fades it back out automatically.
     const lowHealthT = Math.max(0, 1 - healthFrac / LOW_HEALTH_VIGNETTE_THRESHOLD);
     el.lowHealthVignette.style.opacity = (lowHealthT * LOW_HEALTH_VIGNETTE_MAX_OPACITY).toFixed(3);
 
@@ -40,14 +40,14 @@ export function createHud(ctx) {
     // peers see it as a body fade, but first person never renders your own body to fade in
     // the first place. CSS handles the actual 0.5s transition (see #invisible-vignette in
     // style.css); this just toggles which end of it we're headed to.
-    el.invisibleVignette.classList.toggle("active", ctx.invisibleTimer > 0);
+    el.invisibleVignette.classList.toggle("active", ctx.invisibleUntil > Date.now());
   }
 
   function showOverlay(title, message, isLose) {
     el.endTitle.textContent = title;
     el.endTitle.classList.toggle("lose", !!isLose);
     el.endMessage.textContent = message;
-    el.endScreen.classList.remove("hidden");
+    ctx.screens.showScreen(el.endScreen);
   }
 
   // Shows/hides the HUD, crosshair, and touch-control overlay together as one "are we actually
@@ -69,9 +69,10 @@ export function createHud(ctx) {
   }
 
   function endGame(won) {
-    ctx.state = won ? "won" : "lost";
-    ctx.controls.unlock();
-    hideGameplayUI();
+    // Single-player win/lose — previously only set state/unlocked/hid the HUD, leaving
+    // enemies/corpses/grenades/rockets/ability effects fully live in the scene. Routed through
+    // the same authoritative teardown every multiplayer exit path uses.
+    ctx.matchLifecycle.endSession(won ? "won" : "lost");
     if (won) {
       showOverlay("Perimeter Secured", `${ctx.TOTAL_KILLS_TO_WIN} hostiles eliminated. The outpost holds.`, false);
     } else {

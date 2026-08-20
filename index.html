@@ -13,6 +13,7 @@
       <div id="crosshair"></div>
 
       <span id="app-version" class="app-version hidden"></span>
+      <button id="patch-notes-btn" class="patch-notes-corner-btn">Patch Notes</button>
 
       <button id="fullscreen-btn" aria-label="Toggle fullscreen">&#9974;</button>
 
@@ -43,7 +44,7 @@
             <span id="kills" class="value">0 / 20</span>
           </div>
           <div class="stat">
-            <span class="label" id="weapon-label">AK-47</span>
+            <span class="label" id="weapon-label">SMG</span>
             <span id="ammo-text" class="value">30 / 30</span>
           </div>
           <div class="stat">
@@ -93,7 +94,9 @@
       <div id="respawn-overlay" class="hidden">
         <div class="respawn-message">
           <div id="respawn-title">Eliminated</div>
-          <div id="respawn-timer">Respawning in 3s</div>
+          <!-- Esc (or the touch pause button) toggles to the full pause menu and back — see
+               main.js's handlePauseToggle/updateDeathUI. -->
+          <button id="respawn-btn" class="primary-btn" disabled>Respawn in 3s</button>
         </div>
       </div>
 
@@ -135,16 +138,82 @@
 
       <div id="landing" class="overlay">
         <div class="panel">
-          <h1>PERIMETER BREACH</h1>
+          <h1 class="game-title">PERIMETER BREACH</h1>
           <p class="subtitle">Choose a mode</p>
           <div id="update-banner" class="update-banner hidden">
             <span id="update-banner-text"></span>
             <button id="update-install-btn" type="button">Update &amp; Restart</button>
           </div>
           <div class="landing-buttons">
-            <button id="singleplayer-btn">Single Player</button>
-            <button id="multiplayer-btn">Multiplayer</button>
+            <button id="singleplayer-btn" class="primary-btn">Single Player</button>
+            <button id="multiplayer-btn" class="primary-btn">Multiplayer</button>
+            <button id="account-btn">Account</button>
             <button id="settings-btn">Settings</button>
+            <button id="quit-game-btn" class="hidden">Quit Game</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="patch-notes-screen" class="overlay hidden">
+        <div class="panel wide">
+          <h1>Patch Notes</h1>
+          <p class="subtitle">What's changed</p>
+          <div class="visibility-toggle patch-notes-tabs" id="patch-notes-tabs">
+            <button type="button" class="visibility-option patch-notes-tab selected" data-category="new">New</button>
+            <button type="button" class="visibility-option patch-notes-tab" data-category="changed">Changes</button>
+            <button type="button" class="visibility-option patch-notes-tab" data-category="balance">Balance</button>
+            <button type="button" class="visibility-option patch-notes-tab" data-category="fixed">Bug Fixes</button>
+          </div>
+          <div id="patch-notes-list" class="patch-notes-list"></div>
+          <button id="patch-notes-back-btn">Back</button>
+        </div>
+      </div>
+
+      <div id="account-screen" class="overlay hidden">
+        <div class="panel">
+          <h1>Account</h1>
+
+          <div id="account-signed-out">
+            <p class="subtitle">Sign in to track your stats</p>
+            <div class="visibility-toggle" id="account-mode-toggle">
+              <button type="button" id="account-mode-signin-btn" class="visibility-option selected">Sign In</button>
+              <button type="button" id="account-mode-signup-btn" class="visibility-option">Create Account</button>
+            </div>
+            <div class="form-row">
+              <label for="account-email-input">Email</label>
+              <input type="email" id="account-email-input" maxlength="255" placeholder="you@example.com" autocomplete="email" />
+            </div>
+            <div class="form-row hidden" id="account-display-name-row">
+              <label for="account-display-name-input">Display name</label>
+              <input type="text" id="account-display-name-input" maxlength="24" placeholder="Shown to other players" />
+            </div>
+            <div class="form-row">
+              <label for="account-password-input">Password</label>
+              <input type="password" id="account-password-input" maxlength="128" placeholder="At least 8 characters" autocomplete="current-password" />
+            </div>
+            <p id="account-error" class="mp-error hidden"></p>
+            <div class="landing-buttons">
+              <button id="account-submit-btn" class="primary-btn">Sign In</button>
+            </div>
+          </div>
+
+          <div id="account-signed-in" class="hidden">
+            <p class="subtitle">Signed in as <strong id="account-name-display"></strong></p>
+            <div class="account-stats">
+              <div class="account-stat"><span id="account-stat-kills">0</span><label>Kills</label></div>
+              <div class="account-stat"><span id="account-stat-deaths">0</span><label>Deaths</label></div>
+              <div class="account-stat"><span id="account-stat-wins">0</span><label>Wins</label></div>
+              <div class="account-stat"><span id="account-stat-kd">0.00</span><label>K/D</label></div>
+            </div>
+            <p id="account-stats-error" class="mp-error hidden"></p>
+            <div class="landing-buttons">
+              <button id="account-refresh-stats-btn">Refresh Stats</button>
+              <button id="account-sign-out-btn">Sign Out</button>
+            </div>
+          </div>
+
+          <div class="landing-buttons">
+            <button id="account-back-btn">Back</button>
           </div>
         </div>
       </div>
@@ -159,8 +228,8 @@
           </div>
           <p id="mp-connect-error" class="mp-error hidden"></p>
           <div class="landing-buttons">
-            <button id="create-room-btn">Create Room</button>
-            <button id="browse-rooms-btn">Browse Rooms</button>
+            <button id="create-room-btn" class="primary-btn">Create Room</button>
+            <button id="browse-rooms-btn" class="primary-btn">Browse Rooms</button>
             <button id="mp-back-btn">Back</button>
           </div>
         </div>
@@ -279,21 +348,23 @@
             <input type="checkbox" id="force-touch-controls-checkbox" />
             <span>Force touch controls (override auto-detection)</span>
           </label>
-          <button id="settings-back-btn">Back</button>
+          <div class="landing-buttons">
+            <button id="settings-back-btn">Back</button>
+          </div>
         </div>
       </div>
 
       <div id="menu" class="overlay hidden">
         <div class="panel">
-          <h1>PERIMETER BREACH</h1>
+          <h1 class="game-title">PERIMETER BREACH</h1>
           <p class="subtitle">Hold the outpost clearing</p>
           <ul class="briefing">
             <li><b>WASD</b> move &nbsp; <b>Mouse</b> look &nbsp; <b>Space</b> jump (x2)</li>
             <li><b>Click</b> fire &nbsp; <b>Right-click</b> aim &nbsp; <b>Shift</b> sprint &nbsp; <b>C</b> crouch</li>
-            <li><b>R</b> reload</li>
+            <li><b>R</b> reload &nbsp; <b>Scroll</b> switch between your primary and pistol</li>
             <li><b>Hold G</b> aim the throw arc &nbsp; <b>Release G</b> throw</li>
             <li><b>Q</b> use your class ability</li>
-            <li>Pick a class next — each one locks you to a different weapon and ability</li>
+            <li>Pick a class next — each one locks you to a primary weapon, a pistol sidearm, and an ability</li>
             <li>Eliminate <span class="accent-highlight">20 hostiles</span> to secure the perimeter</li>
             <li>Hostiles will hunt you on foot — hold them off or fall back</li>
           </ul>
@@ -319,13 +390,22 @@
 
       <div id="pause-hint" class="overlay hidden">
         <div class="panel small">
-          <h2>Paused</h2>
+          <h2 id="pause-title">Paused</h2>
           <div class="landing-buttons">
+            <!-- Hidden while dead — nothing to "resume" to; respawning happens from the separate
+                 #respawn-overlay screen instead (see main.js's handlePauseToggle/updateDeathUI). -->
             <button id="resume-btn">Resume</button>
+            <!-- Shown instead of Resume while dead — a mouse click or (crucially) a touch tap
+                 both need an in-menu way back to #respawn-overlay, since the touch pause button
+                 that reopened this menu sits *behind* it (this overlay's own z-index covers the
+                 whole screen, touch controls included) and can't be tapped again from here. -->
+            <button id="back-to-respawn-btn" class="hidden">Back</button>
             <button id="change-class-btn">Change Class</button>
             <button id="pause-settings-btn">Settings</button>
             <button id="exit-to-menu-btn">Exit to Main Menu</button>
+            <button id="pause-quit-btn" class="hidden">Quit Game</button>
           </div>
+          <span id="pause-version" class="pause-version hidden"></span>
         </div>
       </div>
 
@@ -336,6 +416,22 @@
           <ul id="end-scoreboard-list" class="player-list hidden"></ul>
           <button id="restart-btn">Restart</button>
           <button id="back-to-room-btn" class="hidden">Back to Room</button>
+        </div>
+      </div>
+
+      <div id="loading-screen" class="loading-screen hidden">
+        <div class="loading-spinner"></div>
+        <p class="loading-label">Deploying to the Perimeter&hellip;</p>
+      </div>
+
+      <div id="quit-confirm-screen" class="overlay hidden">
+        <div class="panel small">
+          <h2>Quit Game?</h2>
+          <p class="subtitle">Any match in progress will be lost.</p>
+          <div class="landing-buttons">
+            <button id="quit-confirm-btn" class="danger-btn">Quit</button>
+            <button id="quit-cancel-btn">Cancel</button>
+          </div>
         </div>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 
 export const ARENA_BOUND = 38;
 
@@ -539,6 +540,35 @@ function buildBoxMesh(hx, hz, h, color) {
   return mesh;
 }
 
+// Two sculpted rock models (public/models/Rock 1.obj, Rock 2.obj) replace the procedural
+// boulder below once loaded — each file's vertex data is already recentered on its own bounding
+// box and scaled to a [-1,1] unit cube (done once, offline), so it's a drop-in swap for the
+// same mesh.scale.set(hx, h/2, hz) math the procedural rock already used. Loaded once at app
+// startup (see preloadRockModels, called fire-and-forget from main.js — same pattern as
+// preloadCharacterModel in humanoidParts.js) rather than per-rock, since buildWorld/buildRockMesh
+// run synchronously and OBJLoader is inherently async. Falls back to the procedural boulder
+// below if the preload hasn't finished (or failed) by the time a rock is actually built.
+const ROCK_MODEL_FILES = ["/models/Rock 1.obj", "/models/Rock 2.obj"];
+let rockModelGeometries = null;
+
+export async function preloadRockModels() {
+  try {
+    const loader = new OBJLoader();
+    const groups = await Promise.all(ROCK_MODEL_FILES.map((url) => loader.loadAsync(url)));
+    const geometries = groups.map((group) => {
+      let geo = null;
+      group.traverse((child) => {
+        if (child.isMesh && !geo) geo = child.geometry;
+      });
+      return geo;
+    });
+    if (geometries.every(Boolean)) rockModelGeometries = geometries;
+    else console.warn("Rock model preload missing mesh geometry, falling back to procedural rocks.");
+  } catch (err) {
+    console.warn("Rock model preload failed, falling back to procedural rocks.", err);
+  }
+}
+
 // Low-poly boulder: an icosahedron with per-vertex radial jitter (breaks the symmetric-ball
 // look) and per-face flat-color shading (cheap blotchy stone texture, no texture map).
 // The collision footprint stays the plain hx/hz/h box in the obstacles list — only the visual
@@ -551,7 +581,23 @@ function buildBoxMesh(hx, hz, h, color) {
 // every duplicate of the same original corner must be displaced by the *same* jittered position,
 // so we weld them by a rounded-coordinate key before jittering, then write the shared result
 // back to every buffer slot that had that key.
-function buildRockMesh(hx, hz, h, tint, emissive) {
+function buildRockMesh(hx, hz, h, tint, emissive, variantIndex = 0) {
+  if (rockModelGeometries && rockModelGeometries.length) {
+    const geo = rockModelGeometries[variantIndex % rockModelGeometries.length].clone();
+    const mat = new THREE.MeshStandardMaterial({
+      color: tint,
+      roughness: 0.88,
+      metalness: 0.02,
+      flatShading: true,
+      emissive,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.scale.set(hx, h / 2, hz);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.rockKind = "model";
+    return mesh;
+  }
   const geo = new THREE.IcosahedronGeometry(1, 1);
   const pos = geo.attributes.position;
   const v = new THREE.Vector3();
@@ -596,6 +642,7 @@ function buildRockMesh(hx, hz, h, tint, emissive) {
   // has no way to communicate a self-chosen value back out.
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  mesh.userData.rockKind = "procedural";
   return mesh;
 }
 
@@ -1256,7 +1303,8 @@ function disposeObject3D(scene, obj) {
 }
 
 // --- Class abilities: Assault's Shield Wall, Demolition's Proximity Mine, Recon's Pulse ---
-// (Scout's Dash needs no new geometry at all — see Player.dash.) These are placed at runtime
+// (Scout's Overclock and Assassin's Invisibility need no new geometry — pure stat/timer effects,
+// not placed objects.) These are placed at runtime
 // during a match, not at map-build time, so they live outside buildWorld/obstacleLayout — the
 // caller (main.js) is responsible for pushing/removing the returned pieces from its own live
 // `obstacles`/`obstacleMeshes` arrays; these functions only build the THREE.js objects.
@@ -1573,6 +1621,10 @@ export function buildWorld(scene, mapId = DEFAULT_MAP_ID) {
   const rockEmissive = new THREE.Color(map.rockEmissive);
   const carColors = map.carColors || [0xa33030, 0x2a4a7a, 0xd8d4c8, 0x1a1a1a, 0x8a8f94];
   let carIndex = 0;
+  // Every rock built below, so upgradeRockVisuals() (see the returned object) can swap a
+  // still-procedural instance's mesh over to the real model once it finishes loading — see the
+  // comment at that function for why this can't just happen once, up front.
+  const rockVisualEntries = [];
   for (const o of map.obstacleLayout) {
     const type = o.type || "rock";
     let mesh;
@@ -1720,11 +1772,14 @@ export function buildWorld(scene, mapId = DEFAULT_MAP_ID) {
 
     // Rocks (and, below, trees) are round-ish blobs, not rectangles — an ellipse inscribed
     // in the same hx/hz hugs their actual silhouette far better than a box does.
-    mesh = buildRockMesh(o.hx, o.hz, o.h, rockTint, rockEmissive);
+    const rockVariant = rotY < Math.PI ? 0 : 1;
+    mesh = buildRockMesh(o.hx, o.hz, o.h, rockTint, rockEmissive, rockVariant);
     mesh.position.set(o.x, 0, o.z);
     mesh.rotation.y = rotY;
     scene.add(mesh);
     added.push(mesh);
+    const rockEntry = { o, rotY, rockVariant, mesh };
+    rockVisualEntries.push(rockEntry);
     // Collision top is intentionally lower than the visual mesh's own scale height (o.h). The
     // rock is a jittered, subdivided icosahedron, not a smooth dome — it only reaches its full
     // scaled height at whichever vertex happens to land nearest the pole, and that vertex is
@@ -1735,6 +1790,7 @@ export function buildWorld(scene, mapId = DEFAULT_MAP_ID) {
     // rock's actual visual mesh at its footprint center across the full obstacle set), which
     // came out to ~0.42-0.53x the full scaled height (avg ~0.47x), not eyeballed.
     pushObstaclePiece(o.x, o.z, o.hx, o.hz, o.h * ROCK_COLLISION_HEIGHT_FACTOR, rotY, mesh, "ellipse");
+    rockEntry.obstacleEntry = obstacles[obstacles.length - 1];
   }
 
   const treeGroups = buildTrees(scene, obstacles, map.treeLayout, map.treeTrunkColor, map.treeFoliageColor);
@@ -1743,6 +1799,30 @@ export function buildWorld(scene, mapId = DEFAULT_MAP_ID) {
   function dispose() {
     for (const obj of added) disposeObject3D(scene, obj);
     scene.fog = null;
+  }
+
+  // preloadRockModels() runs fire-and-forget from app init, in parallel with this very
+  // buildWorld() call (the default map loads synchronously at startup, before that fetch has
+  // any chance to finish) — so on a typical session every rock above just got built from the
+  // procedural fallback, and loadMap() only rebuilds the whole world on an actual map *change*.
+  // Without this, those rocks would stay procedural for the rest of the session even after the
+  // real models finish loading a moment later. Called once the preload resolves (see main.js);
+  // a no-op if this particular world was already replaced by then, or if every rock in it
+  // already upgraded (e.g. this is the second call after a slow/failed load resolved late).
+  function upgradeRockVisuals() {
+    for (const entry of rockVisualEntries) {
+      if (entry.mesh.userData.rockKind === "model") continue;
+      const newMesh = buildRockMesh(entry.o.hx, entry.o.hz, entry.o.h, rockTint, rockEmissive, entry.rockVariant);
+      if (newMesh.userData.rockKind !== "model") return; // models still aren't ready; try again later
+      newMesh.position.copy(entry.mesh.position);
+      newMesh.rotation.y = entry.rotY;
+      scene.add(newMesh);
+      const addedIdx = added.indexOf(entry.mesh);
+      if (addedIdx !== -1) added[addedIdx] = newMesh;
+      if (entry.obstacleEntry) entry.obstacleEntry.mesh = newMesh;
+      disposeObject3D(scene, entry.mesh);
+      entry.mesh = newMesh;
+    }
   }
 
   return {
@@ -1755,6 +1835,7 @@ export function buildWorld(scene, mapId = DEFAULT_MAP_ID) {
     ceilingHeight: map.ceiling ? wallH : Infinity,
     dispose,
     updateSky,
+    upgradeRockVisuals,
   };
 }
 
@@ -1939,6 +2020,33 @@ export function resolveCollisions(pos, radius, obstacles, feetY = 0, arenaBound 
   const b = arenaBound - radius - 0.6;
   pos.x = Math.max(-b, Math.min(b, pos.x));
   pos.z = Math.max(-b, Math.min(b, pos.z));
+}
+
+// Query-only version of the height-gating logic collideProjectile uses below, for a
+// projectile that should detonate on contact (a rocket) rather than bounce off it (a
+// grenade) — same shape/height rules, just a true/false "did it touch something" instead of
+// a position/velocity mutation.
+export function projectileHitsObstacle(pos, radius, obstacles) {
+  for (const o of obstacles) {
+    if (o.groundOnly) continue;
+    const dx = pos.x - o.x;
+    const dz = pos.z - o.z;
+
+    if (o.shape === "roofPrism" || o.shape === "ramp" || o.slopeGate) {
+      const gate = o.shape === "roofPrism" || o.shape === "ramp" ? o : o.slopeGate;
+      const effectiveTop = o.shape === "ramp" ? rampEffectiveTop(dx, dz, o.rotY, gate) : roofSlopeEffectiveTop(dx, dz, o.rotY, gate);
+      if (pos.y >= effectiveTop) continue;
+      if (o.shape === "roofPrism" && pos.y < gate.wallTop) continue;
+    } else if (o.top !== undefined && pos.y >= o.top) {
+      continue;
+    }
+
+    const close = closestOffsetOnObstacle(dx, dz, o);
+    const diffX = dx - close.x;
+    const diffZ = dz - close.z;
+    if (diffX * diffX + diffZ * diffZ < radius * radius) return true;
+  }
+  return false;
 }
 
 // Circle-vs-box collision for a free-flying projectile (grenade): pushes it out of the
